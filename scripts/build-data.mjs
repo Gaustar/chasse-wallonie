@@ -2,6 +2,7 @@
 // (territoires de chasse anonymisés + table des dates de chasse déclarées).
 import { writeFile, mkdir, rm } from 'node:fs/promises';
 import '../ics.js'; // définit globalThis.ICS
+import { chassesONF } from './onf.mjs';
 
 const BASE = 'https://geoservices.wallonie.be/arcgis/rest/services/FAUNE_FLORE/CHASSE_TERRIT_ANONYM/MapServer';
 const LOT = 100; // territoires par requête de géométrie
@@ -153,12 +154,36 @@ const sortie = {
 };
 
 await mkdir(new URL('../data/', import.meta.url), { recursive: true });
-await writeFile(new URL('../data/chasses.json', import.meta.url), JSON.stringify(sortie));
 
-// 5. Calendriers d'abonnement (.ics) : Wallonie, par cantonnement, par territoire.
+// 5. France : jours chassés des forêts domaniales proches (ONF). Une panne de l'ONF ne doit pas
+// bloquer la Wallonie : on reprend alors la dernière récupération publiée, et le site l'annonce.
 const SITE = process.env.SITE ?? (process.env.GITHUB_REPOSITORY
   ? `https://${process.env.GITHUB_REPOSITORY.split('/')[0].toLowerCase()}.github.io/${process.env.GITHUB_REPOSITORY.split('/')[1]}/`
   : 'https://gaustar.github.io/chasse-wallonie/');
+const publie = await fetch(`${SITE}data/onf.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+const age = publie ? (Date.now() - new Date(publie.genere)) / 3600000 : Infinity;
+let onf = publie;
+let erreurONF = null;
+if (age > 20 || process.env.ONF === 'force') { // une récupération par jour suffit et ménage l'ONF
+  try {
+    onf = await chassesONF(debut);
+  } catch (e) {
+    erreurONF = e.message;
+    console.error('ONF indisponible :', e.message);
+  }
+}
+if (onf) {
+  for (const f of onf.features) {
+    const d = f.properties.d.filter(([jour]) => jour >= debut);
+    if (d.length) sortie.features.push({ ...f, properties: { ...f.properties, d } });
+  }
+  if (onf.saison?.n) sortie.periodes.push({ fr: 1, mode: 'B', debut: onf.saison.debut, fin: onf.saison.fin, n: onf.saison.n });
+  await writeFile(new URL('../data/onf.json', import.meta.url), JSON.stringify(onf));
+}
+sortie.meta.onf = onf ? { genere: onf.genere, forets: onf.forets, chasses: onf.chasses, erreur: erreurONF } : { erreur: erreurONF ?? 'aucune donnée' };
+await writeFile(new URL('../data/chasses.json', import.meta.url), JSON.stringify(sortie));
+
+// 6. Calendriers d'abonnement (.ics) : Wallonie, par cantonnement ou forêt, par territoire.
 const { ICS } = globalThis;
 const liste = ICS.territoires(sortie);
 const opt = { base: SITE, source: new Date(sortie.meta.extractionDNF ?? Date.now()).toLocaleDateString('fr-BE', { timeZone: 'Europe/Brussels' }) };
@@ -166,14 +191,14 @@ const cal = new URL('../cal/', import.meta.url);
 await rm(cal, { recursive: true, force: true });
 await mkdir(new URL('t/', cal), { recursive: true });
 const ecrit = (nom, titre, description, evts) => writeFile(new URL(nom, cal), ICS.fichier(titre, description, evts));
-const NOTE = 'Chasses déclarées au DNF (SPW), mises à jour automatiquement. Les panneaux sur le terrain priment toujours.';
+const NOTE = 'Chasses déclarées au DNF (Wallonie) et jours chassés publiés par l’ONF (France), mis à jour automatiquement. Les panneaux sur le terrain priment toujours.';
 
-await ecrit('wallonie.ics', 'Chasses · Wallonie', NOTE, ICS.parJour(liste, { ...opt, portee: 'Wallonie', cle: 'wallonie' }));
-for (const [can, service] of cantons) {
+await ecrit('wallonie.ics', 'Chasses · Wallonie', NOTE, ICS.parJour(liste.filter((t) => !t.fr), { ...opt, portee: 'Wallonie', cle: 'wallonie' }));
+const zones = new Map(liste.filter((t) => t.can).map((t) => [t.can, ICS.zone(t)]));
+for (const [can, zone] of zones) {
   const dedans = liste.filter((t) => t.can === can);
-  const nom = ICS.nomCantonnement(service);
-  await ecrit(`cantonnement-${can}.ics`, `Chasses · ${nom}`, NOTE, ICS.parJour(dedans, { ...opt, portee: `cantonnement de ${nom}`, cle: `can${can}`, can }));
-  await ecrit(`cantonnement-${can}-detail.ics`, `Chasses · ${nom} (par territoire)`, NOTE, ICS.parTerritoire(dedans, opt));
+  await ecrit(`${zone.fichier}.ics`, `Chasses · ${zone.court}`, NOTE, ICS.parJour(dedans, { ...opt, portee: zone.nom, cle: zone.cle, can }));
+  await ecrit(`${zone.fichier}-detail.ics`, `Chasses · ${zone.court} (par territoire)`, NOTE, ICS.parTerritoire(dedans, opt));
 }
-for (const t of liste) await ecrit(`t/${t.lot}.ics`, `Chasses · territoire ${t.lot}`, NOTE, ICS.parTerritoire([t], opt));
-console.log(sortie.meta, { calendriers: 1 + 2 * cantons.size + liste.length });
+for (const t of liste) await ecrit(`t/${ICS.fichierLot(t.lot)}.ics`, `Chasses · ${ICS.libelle(t)}`, NOTE, ICS.parTerritoire([t], opt));
+console.log(sortie.meta, { calendriers: 1 + 2 * zones.size + liste.length });

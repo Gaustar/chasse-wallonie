@@ -26,7 +26,7 @@
   function territoires(donnees) {
     const vus = new Map();
     for (const { properties: p } of donnees.features) {
-      if (!vus.has(p.lot)) vus.set(p.lot, { lot: p.lot, ugc: p.ugc, cant: p.cant, can: p.can, centre: p.c, d: p.d });
+      if (!vus.has(p.lot)) vus.set(p.lot, { lot: p.lot, ugc: p.ugc, cant: p.cant, can: p.can, centre: p.c, d: p.d, fr: p.fr, url: p.url });
     }
     for (const t of donnees.sansTrace ?? []) vus.set(t.lot, { ...t, sansTrace: true });
     return [...vus.values()];
@@ -39,7 +39,17 @@
       .filter((t) => t.d.length);
   }
 
-  const pied = (o) => `Source : SPW – DNF${o.source ? `, données du ${o.source}` : ''}. Les panneaux sur le terrain priment toujours.`;
+  // Nom d'affichage d'un territoire wallon ou d'un lot ONF, et de sa zone (cantonnement ou forêt domaniale).
+  const libelle = (t) => (t.fr ? `lot ONF ${t.lot}` : `territoire ${t.lot}`);
+  const fichierLot = (lot) => String(lot).replace(/[^\w-]+/g, '_');
+  function zone(t) {
+    if (t.fr) return { cle: `foret${t.can}`, fichier: `foret-${t.can}`, nom: t.cant, court: maj(t.cant.replace(/^forêt domaniale (de |du |des |d['’])/i, '')) + ' (ONF)', fr: true };
+    const nom = nomCantonnement(t.cant);
+    return { cle: `can${t.can}`, fichier: `cantonnement-${t.can}`, nom: `cantonnement de ${nom}`, court: nom, fr: false };
+  }
+
+  const pied = (o, fr) =>
+    (fr ? 'Source : calendrier de chasse de l’ONF, données indicatives.' : `Source : SPW – DNF${o.source ? `, données du ${o.source}` : ''}.`) + ' Les panneaux sur le terrain priment toujours.';
 
   // Un événement par territoire ; les jours consécutifs de même nature deviennent une seule période.
   function parTerritoire(liste, o) {
@@ -47,7 +57,7 @@
     for (const t of liste) {
       const groupes = new Map();
       for (const [jour, mode, ferme] of t.d) {
-        const cle = mode + ferme;
+        const cle = mode + (ferme ?? 'x');
         if (!groupes.has(cle)) groupes.set(cle, []);
         groupes.get(cle).push(jour);
       }
@@ -60,23 +70,26 @@
           while (k + 1 < jours.length && jours[k + 1] === plus(jours[k], 1)) k++;
           const debut = jours[i];
           const fin = jours[k];
-          const canton = nomCantonnement(t.cant);
+          const lieu = t.cant ? (t.fr ? t.cant : nomCantonnement(t.cant)) : '';
+          const quand = debut === fin ? `le ${lisible(debut)}` : `du ${lisible(debut)} au ${lisible(fin)}`;
+          const lien = `${o.base}#du=${debut}&au=${fin}&lot=${encodeURIComponent(t.lot)}`;
           evts.push({
-            uid: `${debut}-${t.lot}-${cle}@chasse-wallonie`,
+            uid: `${debut}-${fichierLot(t.lot)}-${cle}@chasse-wallonie`,
             debut,
             fin,
-            resume: `${maj(MODES[mode][0])}${ferme ? ', chemins fermés' : ''} · territoire ${t.lot}${canton ? ` · ${canton}` : ''}`,
+            resume: `${maj(MODES[mode][0])}${ferme ? ', chemins fermés' : ''} · ${libelle(t)}${lieu ? ` · ${lieu}` : ''}`,
             description: [
-              `${maj(MODES[mode][0])} déclarée au DNF ${debut === fin ? `le ${lisible(debut)}` : `du ${lisible(debut)} au ${lisible(fin)}`}.`,
-              `Fermeture des chemins : ${ferme ? 'oui' : 'non'}.`,
-              `Territoire de chasse ${t.lot}${t.ugc ? ` – ${t.ugc}` : ''}.`,
-              canton ? `Cantonnement : ${canton}${t.sansTrace ? ' (d’après le numéro de lot, tracé non publié)' : ''}.` : null,
-              `Carte : ${o.base}#du=${debut}&au=${fin}&lot=${t.lot}`,
-              pied(o),
+              t.fr ? `Action collective de chasse inscrite au calendrier de l’ONF ${quand}.` : `${maj(MODES[mode][0])} déclarée au DNF ${quand}.`,
+              t.fr ? null : `Fermeture des chemins : ${ferme ? 'oui' : 'non'}.`,
+              t.fr ? `${maj(libelle(t))}, ${t.cant}.` : `Territoire de chasse ${t.lot}${t.ugc ? ` – ${t.ugc}` : ''}.`,
+              !t.fr && lieu ? `Cantonnement : ${lieu}${t.sansTrace ? ' (d’après le numéro de lot, tracé non publié)' : ''}.` : null,
+              `Carte : ${lien}`,
+              t.fr && t.url ? `Calendrier ONF : ${t.url}` : null,
+              pied(o, t.fr),
             ].filter(Boolean).join('\n'),
-            lieu: `Territoire de chasse ${t.lot}${canton ? `, cantonnement de ${canton}` : ''}, Wallonie`,
+            lieu: t.fr ? `${maj(libelle(t))}, ${t.cant}, France` : `Territoire de chasse ${t.lot}${lieu ? `, cantonnement de ${lieu}` : ''}, Wallonie`,
             geo: t.centre,
-            url: `${o.base}#du=${debut}&au=${fin}&lot=${t.lot}`,
+            url: lien,
             categorie: maj(MODES[mode][0]),
           });
           i = k + 1;
@@ -91,7 +104,8 @@
     const jours = new Map();
     for (const t of liste) {
       for (const [jour, mode, ferme] of t.d) {
-        if (!jours.has(jour)) jours.set(jour, { B: [], A: [], X: [], fermes: new Set() });
+        if (!jours.has(jour)) jours.set(jour, { B: [], A: [], X: [], fermes: new Set(), wallons: 0, francais: 0 });
+        jours.get(jour)[t.fr ? 'francais' : 'wallons']++;
         jours.get(jour)[mode].push(t.lot);
         if (ferme) jours.get(jour).fermes.add(t.lot);
       }
@@ -108,17 +122,17 @@
           fin: jour,
           resume: `Chasse · ${o.portee} : ${presents.map(compte).join(', ')}`,
           description: [
-            `Chasses déclarées au DNF le ${lisible(jour)} – ${o.portee}.`,
+            `Chasses ${j.wallons ? 'déclarées au DNF' : 'inscrites au calendrier de l’ONF'}${j.wallons && j.francais ? ' et inscrites au calendrier de l’ONF' : ''} le ${lisible(jour)} – ${o.portee}.`,
             ...presents.map((m) => {
               const lots = [...new Set(j[m])].sort();
               const reste = lots.length - MAX_LOTS;
               return `${maj(MODES[m][1])} (${lots.length}) : territoire${lots.length > 1 ? 's' : ''} ${lots.slice(0, MAX_LOTS).join(', ')}${reste > 0 ? `… et ${reste} autres, voir la carte` : ''}.`;
             }),
-            `Chemins fermés sur ${j.fermes.size} territoire${j.fermes.size > 1 ? 's' : ''}.`,
+            j.wallons ? `Chemins fermés sur ${j.fermes.size} territoire${j.fermes.size > 1 ? 's' : ''} wallon${j.fermes.size > 1 ? 's' : ''}.` : null,
             `Carte : ${lien(jour)}`,
-            pied(o),
-          ].join('\n'),
-          lieu: o.portee === 'Wallonie' ? 'Wallonie' : `${maj(o.portee)}, Wallonie`,
+            pied(o, !j.wallons),
+          ].filter(Boolean).join('\n'),
+          lieu: maj(o.portee),
           url: lien(jour),
           categorie: 'Chasse',
         };
@@ -191,5 +205,5 @@
     return lignes.map(plie).join('\r\n') + '\r\n';
   }
 
-  globalThis.ICS = { territoires, filtre, parTerritoire, parJour, fichier, nomCantonnement };
+  globalThis.ICS = { territoires, filtre, parTerritoire, parJour, fichier, nomCantonnement, zone, libelle, fichierLot };
 })();

@@ -26,7 +26,7 @@ const carte = L.map('carte', { zoomControl: false, renderer: L.canvas({ padding:
 carte.on('moveend', () => retient('vue', { c: [carte.getCenter().lat, carte.getCenter().lng], z: carte.getZoom() }));
 L.control.zoom({ position: 'bottomleft' }).addTo(carte);
 L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(carte);
-const CREDIT = 'Données chasse : SPW – DNF';
+const CREDIT = 'Données chasse : SPW – DNF, ONF';
 // Photo aérienne SPW : pas de tuiles Web Mercator, on demande chaque tuile à l'export ArcGIS (512 px).
 const Ortho = L.TileLayer.extend({
   getTileUrl(c) {
@@ -98,7 +98,7 @@ function dessine() {
       const actives = dansPeriode(f, modes);
       chasses += actives.length;
       const mode = GRAVITE.find((m) => actives.some((a) => a[1] === m));
-      const fermee = actives.some((a) => a[2]);
+      const fermee = actives.some((a) => a[2]) || f.properties.fr; // l'ONF ne parle pas de fermeture : trait plein
       return {
         color: COULEURS[mode],
         weight: fermee ? 2.5 : 1.5,
@@ -122,8 +122,13 @@ const courte = (jour) =>
 
 // Toutes les chasses à venir, tracées ou non : [date, mode, fermeture].
 const toutes = () => [...donnees.features.map((f) => f.properties.d), ...(donnees.sansTrace ?? []).map((t) => t.d)].flat();
-const prochaine = (modes, apres) =>
-  toutes().reduce((min, [j, m]) => (modes.includes(m) && j > apres && (!min || j < min) ? j : min), null);
+const prochaine = (modes, apres, dates = toutes()) =>
+  dates.reduce((min, [j, m]) => (modes.includes(m) && j > apres && (!min || j < min) ? j : min), null);
+// Dates d'une seule source : forêts ONF (France) ou territoires wallons.
+const datesDe = (fr) => [
+  ...donnees.features.filter((f) => !!f.properties.fr === fr).map((f) => f.properties.d),
+  ...(fr ? [] : (donnees.sansTrace ?? []).map((t) => t.d)),
+].flat();
 
 // Rien sur la période affichée : on annonce la prochaine chasse déclarée.
 function messageVide(modes) {
@@ -150,7 +155,7 @@ function affichePeriode() {
   const toutesSaisons = donnees.periodes ?? [];
   if (!toutesSaisons.length) return;
   const enCours = toutesSaisons.filter((p) => p.fin >= auj);
-  const derniere = Math.max(...toutesSaisons.map((p) => p.saison));
+  const derniere = Math.max(...toutesSaisons.filter((p) => !p.fr).map((p) => p.saison));
   const lignes = enCours.length ? enCours : toutesSaisons.filter((p) => p.saison === derniere);
   const debut = lignes.reduce((m, p) => (p.debut < m ? p.debut : m), lignes[0].debut);
   const fin = lignes.reduce((m, p) => (p.fin > m ? p.fin : m), lignes[0].fin);
@@ -164,16 +169,20 @@ function affichePeriode() {
 
   $('#periode ul').innerHTML = lignes
     .map((p) => {
-      const pro = prochaine([p.mode], decale(auj, -1));
+      const pro = prochaine([p.mode], decale(auj, -1), datesDe(!!p.fr));
       let etat;
       if (auj > p.fin || !pro) etat = 'terminé pour cette saison';
       else if (pro === auj) etat = "en cours, chasses déclarées aujourd'hui";
       else if (auj < p.debut) etat = `pas commencé, première le ${longue(pro)}`;
       else etat = `en cours, prochaine le ${longue(pro)}`;
-      const saison = lignes.some((l) => l.saison !== p.saison) ? ` (saison ${p.saison}-${p.saison + 1})` : '';
-      return `<li><b style="background:${COULEURS[p.mode]}"></b>${LIBELLES[p.mode]}${saison} <span>du ${courte(p.debut)} au ${courte(p.fin)} · ${p.n} chasses déclarées</span><em>${etat}</em></li>`;
+      const saison = !p.fr && lignes.some((l) => !l.fr && l.saison !== p.saison) ? ` (saison ${p.saison}-${p.saison + 1})` : '';
+      const nom = p.fr ? 'Forêts domaniales ONF (France)' : LIBELLES[p.mode] + saison;
+      return `<li><b style="background:${COULEURS[p.mode]}"></b>${nom} <span>du ${courte(p.debut)} au ${courte(p.fin)} · ${p.n} ${p.fr ? 'jours chassés publiés' : 'chasses déclarées'}</span><em>${etat}</em></li>`;
     })
-    .join('');
+    .join('') +
+    (lignes.some((p) => p.fr)
+      ? '<li class="limite">France : seules les forêts domaniales gérées par l’ONF autour de Sedan et Charleville sont couvertes. Les chasses en forêts privées ou communales n’y sont pas publiées.</li>'
+      : '');
   $('#periode').hidden = false;
 }
 
@@ -201,10 +210,15 @@ function infobulle(f) {
   const lignes = p.d
     .map(([j, m, ferme]) => {
       const hors = j < periode.debut || j > periode.fin ? ' class="hors"' : '';
-      return `<li${hors}><b style="background:${COULEURS[m]}"></b>${lisible(j)} · ${LIBELLES[m]}<small>${ferme ? 'chemins fermés' : 'sans fermeture'}</small></li>`;
+      const precision = p.fr ? '' : `<small>${ferme ? 'chemins fermés' : 'sans fermeture'}</small>`;
+      return `<li${hors}><b style="background:${COULEURS[m]}"></b>${lisible(j)} · ${p.fr ? 'Chasse collective' : LIBELLES[m]}${precision}</li>`;
     })
     .join('');
-  return `<h3>Territoire ${esc(p.lot)}</h3><p>${esc([p.ugc, p.cant].filter(Boolean).join(' · '))}</p><ul>${lignes}</ul><a href="#" class="vers-cal" data-lot="${esc(p.lot)}">📅 Ajouter au calendrier</a>`;
+  const titre = p.fr ? `Lot ONF ${esc(p.lot)}` : `Territoire ${esc(p.lot)}`;
+  const sous = p.fr
+    ? `${esc(p.cant[0].toUpperCase() + p.cant.slice(1))} · <a href="${esc(p.url)}" target="_blank" rel="noopener">calendrier ONF</a>`
+    : esc([p.ugc, p.cant].filter(Boolean).join(' · '));
+  return `<h3>${titre}</h3><p>${sous}</p><ul>${lignes}</ul><a href="#" class="vers-cal" data-lot="${esc(p.lot)}">📅 Ajouter au calendrier</a>`;
 }
 
 // Point dans un polygone GeoJSON (anneaux extérieurs et trous).
@@ -232,7 +246,8 @@ function verifiePosition() {
   if (touche) {
     const [j, m, ferme] = dansPeriode(touche, modes)[0];
     a.className = 'danger';
-    a.textContent = `Vous êtes dans le territoire ${touche.properties.lot} : chasse déclarée ${lisible(j)} (${LIBELLES[m].toLowerCase()}${ferme ? ', chemins fermés' : ''})`;
+    const ou = touche.properties.fr ? `le lot ONF ${touche.properties.lot}` : `le territoire ${touche.properties.lot}`;
+    a.textContent = `Vous êtes dans ${ou} : chasse ${touche.properties.fr ? 'inscrite au calendrier' : 'déclarée'} ${lisible(j)} (${LIBELLES[m].toLowerCase()}${ferme ? ', chemins fermés' : ''})`;
   } else {
     a.className = 'ok';
     a.textContent = 'Aucune chasse déclarée à votre position sur la période affichée';
@@ -303,9 +318,9 @@ async function charge() {
   const m = donnees.meta;
   const fmt = (d) => new Date(d).toLocaleDateString('fr-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' });
   const perime = Date.now() - new Date(m.genere) > 36 * 3600 * 1000; // deux mises à jour manquées
-  etat.className = perime ? 'perime' : '';
+  etat.className = perime || !m.onf?.genere || m.onf.erreur ? 'perime' : '';
   etat.textContent =
-    `${perime ? '⚠ Données non rafraîchies · ' : ''}DNF au ${fmt(m.extractionDNF)}, récupéré le ${fmt(m.genere)} · chasses déclarées jusqu'au ${new Date(m.fin + 'T12:00:00Z').toLocaleDateString('fr-BE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}`;
+    `${perime ? '⚠ Données non rafraîchies · ' : ''}${!m.onf?.genere ? '⚠ Forêts ONF (France) indisponibles · ' : m.onf.erreur ? `⚠ ONF en panne, données du ${fmt(m.onf.genere)} · ` : ''}DNF au ${fmt(m.extractionDNF)}, récupéré le ${fmt(m.genere)}${m.onf?.genere && !m.onf.erreur ? `, ONF le ${fmt(m.onf.genere)}` : ''} · chasses déclarées jusqu'au ${new Date(m.fin + 'T12:00:00Z').toLocaleDateString('fr-BE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}`;
   for (const id of ['#du', '#au']) {
     $(id).min = m.debut;
     $(id).max = m.fin;
@@ -341,15 +356,20 @@ const SITE = location.origin + location.pathname.replace(/[^/]*$/, '');
 let lotChoisi = null;
 const champ = (nom) => document.querySelector(`#cal input[name=${nom}]:checked`).value;
 
+const zonesCal = new Map(); // code → { nom, court, fichier, cle, fr }
 function prepareCalendrier() {
-  const cantons = new Map();
-  for (const t of ICS.territoires(donnees)) if (t.can && t.cant) cantons.set(t.can, ICS.nomCantonnement(t.cant));
-  $('#cal-can').innerHTML = [...cantons]
-    .sort((a, b) => a[1].localeCompare(b[1], 'fr'))
-    .map(([can, nom]) => `<option value="${esc(can)}">${esc(nom)}</option>`)
-    .join('');
+  for (const t of ICS.territoires(donnees)) if (t.can && t.cant) zonesCal.set(t.can, ICS.zone(t));
+  const groupe = (titre, fr) => {
+    const options = [...zonesCal]
+      .filter(([, z]) => z.fr === fr)
+      .sort((a, b) => a[1].court.localeCompare(b[1].court, 'fr'))
+      .map(([can, z]) => `<option value="${esc(can)}">${esc(z.court)}</option>`)
+      .join('');
+    return options ? `<optgroup label="${titre}">${options}</optgroup>` : '';
+  };
+  $('#cal-can').innerHTML = groupe('Wallonie – cantonnements', false) + groupe('France – forêts domaniales', true);
   const prefere = memoire('canton', null);
-  if (cantons.has(prefere)) $('#cal-can').value = prefere;
+  if (zonesCal.has(prefere)) $('#cal-can').value = prefere;
 }
 
 // Emprise de chaque polygone, calculée une fois, pour savoir ce qui est à l'écran.
@@ -372,15 +392,16 @@ function selection() {
 
   if (zone === 'lot') {
     liste = liste.filter((t) => t.lot === lotChoisi);
-    nom = `territoire ${lotChoisi}`;
-    Object.assign(opt, { portee: nom, cle: `lot${lotChoisi}` });
-    abo = `cal/t/${lotChoisi}.ics`;
+    nom = liste[0] ? ICS.libelle(liste[0]) : `territoire ${lotChoisi}`;
+    Object.assign(opt, { portee: nom, cle: `lot${ICS.fichierLot(lotChoisi)}` });
+    abo = `cal/t/${ICS.fichierLot(lotChoisi)}.ics`;
   } else if (zone === 'can') {
     const can = $('#cal-can').value;
+    const z = zonesCal.get(can);
     liste = liste.filter((t) => t.can === can);
-    nom = `cantonnement de ${$('#cal-can').selectedOptions[0]?.textContent ?? can}`;
-    Object.assign(opt, { portee: nom, cle: `can${can}`, can });
-    abo = `cal/cantonnement-${can}${detail === 'territoire' ? '-detail' : ''}.ics`;
+    nom = z?.nom ?? can;
+    Object.assign(opt, { portee: nom, cle: z?.cle ?? can, can });
+    abo = z ? `cal/${z.fichier}${detail === 'territoire' ? '-detail' : ''}.ics` : null;
   } else if (zone === 'vue') {
     const ecran = carte.getBounds();
     const visibles = new Set(donnees.features.filter((f) => emprise(f).intersects(ecran)).map((f) => f.properties.lot));
@@ -389,6 +410,7 @@ function selection() {
     Object.assign(opt, { portee: 'zone choisie sur la carte', cle: 'zone' });
     pourquoi = "Pas d'abonnement pour une zone dessinée à l'écran : choisissez un cantonnement ou un territoire pour un calendrier qui se met à jour.";
   } else {
+    liste = liste.filter((t) => !t.fr);
     Object.assign(opt, { portee: 'Wallonie', cle: 'wallonie' });
     if (detail === 'jour') abo = 'cal/wallonie.ics';
     else pourquoi = "Pas d'abonnement détaillé pour toute la Wallonie (plusieurs milliers d'événements) : prenez le résumé par jour ou un cantonnement.";
@@ -415,7 +437,7 @@ function majCalendrier() {
     $('#cal-webcal').href = adresse.replace(/^https?:/, 'webcal:');
     $('#cal-google').href = `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(adresse.replace(/^https:/, 'http:'))}`;
     $('#cal-copie').dataset.adresse = adresse;
-    $('#cal-abo-note').textContent = `Calendrier du ${s.nom}, toute la saison et tous les modes, régénéré trois fois par jour. Votre agenda le relit à son propre rythme (souvent une fois par jour). Sans rappel.`;
+    $('#cal-abo-note').textContent = `Calendrier « ${s.nom} », toute la saison et tous les modes, régénéré trois fois par jour. Votre agenda le relit à son propre rythme (souvent une fois par jour). Sans rappel.`;
   } else {
     $('#cal-abo-note').textContent = s.pourquoi;
   }
@@ -424,7 +446,7 @@ function majCalendrier() {
 function ouvreCalendrier(lot) {
   lotChoisi = lot ?? null;
   $('#cal-lot').hidden = !lotChoisi;
-  $('#cal-lot span').textContent = lotChoisi ? `Territoire ${lotChoisi}` : '';
+  $('#cal-lot span').textContent = lotChoisi ? (/^\d+$/.test(lotChoisi) ? `Territoire ${lotChoisi}` : `Lot ONF ${lotChoisi}`) : '';
   if (lotChoisi) {
     document.querySelector('#cal input[value=lot]').checked = true;
     document.querySelector('#cal input[value=territoire]').checked = true;
@@ -453,7 +475,7 @@ $('#cal').addEventListener('change', (e) => {
 $('#cal-dl').addEventListener('click', async () => {
   const s = selection();
   const titre = `Chasses · ${s.nom}`;
-  const contenu = ICS.fichier(titre, 'Chasses déclarées au DNF (SPW). Les panneaux sur le terrain priment toujours.', s.evts, { rappel: $('#cal-rappel').value });
+  const contenu = ICS.fichier(titre, 'Chasses déclarées au DNF (Wallonie) et jours chassés publiés par l’ONF (France). Les panneaux sur le terrain priment toujours.', s.evts, { rappel: $('#cal-rappel').value });
   const nomFichier = `chasses-${s.nom.replace(/[^a-z0-9à-ÿ]+/gi, '-').toLowerCase()}-${s.du}_${s.au}.ics`;
   const fichier = new File([contenu], nomFichier, { type: 'text/calendar' });
   // Sur téléphone, le partage propose directement l'application d'agenda.

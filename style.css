@@ -52,6 +52,7 @@ header { padding: 8px 10px 6px; padding-top: max(8px, env(safe-area-inset-top));
 #periode li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding: 5px 0; border-top: 1px solid #ffffff1a; color: var(--texte); }
 #periode li b { width: 10px; height: 10px; border-radius: 50%; }
 #periode li span { color: var(--discret); }
+#periode li.limite { color: #ffe2a8; font-size: 12px; }
 #periode li em { flex-basis: 100%; padding-left: 18px; font-style: normal; }
 #vide { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 12px; padding: 10px 12px; background: #2f3d35; text-align: center; }
 #vide[hidden] { display: none; }

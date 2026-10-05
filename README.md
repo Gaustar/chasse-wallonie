@@ -15,6 +15,8 @@ Limites : seules les chasses déclarées au DNF apparaissent ; le DNF synchronis
 
 Fonds de carte : topographique IGN/NGI (CartoWeb), orthophotos SPW (`IMAGERIE/ORTHO_LAST`), OpenTopoMap.
 
+La période affichée (début et fin par mode) vient des premières et dernières dates déclarées de la saison, pas des dates légales d'ouverture. Rien n'est lié à une année : le script suit la saison publiée par le DNF et le workflow se réactive lui-même pour ne pas être suspendu.
+
 ## Utilisation locale
 
 ```bash

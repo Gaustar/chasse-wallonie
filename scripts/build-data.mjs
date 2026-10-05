@@ -98,6 +98,30 @@ const sansTrace = cles
   .filter((t) => !trouves.has(t.lot))
   .map((t) => ({ ...t, cant: cantons.get(t.lot.slice(0, 3)) ?? null }))
   .sort((a, b) => a.lot.localeCompare(b.lot));
+// 4. Période déclarée par saison et par mode (première et dernière date, chasses passées comprises).
+const jourUTC = (ms) => new Date(ms).toISOString().slice(0, 10);
+const periodes = (
+  await requete(1, {
+    where: '1=1',
+    groupByFieldsForStatistics: 'SAISON,SAISON_TXT,MODE_CHASSE_TXT',
+    outStatistics: JSON.stringify([
+      { statisticType: 'min', onStatisticField: 'DATE_CHASSE', outStatisticFieldName: 'DEBUT' },
+      { statisticType: 'max', onStatisticField: 'DATE_CHASSE', outStatisticFieldName: 'FIN' },
+      { statisticType: 'count', onStatisticField: 'OBJECTID', outStatisticFieldName: 'N' },
+    ]),
+    f: 'json',
+  })
+).features
+  .map(({ attributes: a }) => ({
+    saison: a.SAISON,
+    libelle: a.SAISON_TXT,
+    mode: MODES[a.MODE_CHASSE_TXT.split('/')[0].trim()],
+    debut: jourUTC(a.DEBUT),
+    fin: jourUTC(a.FIN),
+    n: a.N,
+  }))
+  .sort((a, b) => a.saison - b.saison || 'BAX'.indexOf(a.mode) - 'BAX'.indexOf(b.mode));
+
 const sortie = {
   type: 'FeatureCollection',
   meta: {
@@ -109,6 +133,7 @@ const sortie = {
     territoiresDeclares: cles.length,
     territoiresSansGeometrie: sansTrace.length,
   },
+  periodes,
   sansTrace,
   features,
 };

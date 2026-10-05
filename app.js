@@ -91,7 +91,70 @@ function dessine() {
   const n = new Set(couche.getLayers().map((l) => l.feature.properties.lot)).size;
   $('#compte').textContent = `${n} territoire${n > 1 ? 's' : ''}`;
   listeSansTrace(modes);
+  messageVide(modes);
   verifiePosition();
+}
+
+const longue = (jour) =>
+  new Date(jour + 'T12:00:00Z').toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+const courte = (jour) =>
+  new Date(jour + 'T12:00:00Z').toLocaleDateString('fr-BE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+// Toutes les chasses à venir, tracées ou non : [date, mode, fermeture].
+const toutes = () => [...donnees.features.map((f) => f.properties.d), ...(donnees.sansTrace ?? []).map((t) => t.d)].flat();
+const prochaine = (modes, apres) =>
+  toutes().reduce((min, [j, m]) => (modes.includes(m) && j > apres && (!min || j < min) ? j : min), null);
+
+// Rien sur la période affichée : on annonce la prochaine chasse déclarée.
+function messageVide(modes) {
+  const bloc = $('#vide');
+  const rien = !toutes().some(([j, m]) => j >= periode.debut && j <= periode.fin && modes.includes(m));
+  bloc.hidden = !rien;
+  if (!rien) return;
+  const suite = prochaine(modes, periode.fin);
+  const bouton = $('#vide button');
+  bouton.hidden = !suite;
+  if (suite) {
+    $('#vide span').textContent = `Aucune chasse déclarée sur cette période. Prochaine : ${longue(suite)}.`;
+    bouton.textContent = 'Voir ce jour';
+    bouton.onclick = () => choisit({ debut: suite, fin: suite });
+  } else {
+    $('#vide span').textContent =
+      "Aucune chasse déclarée sur cette période ni après. Les dates de la prochaine saison s'afficheront dès leur déclaration au DNF.";
+  }
+}
+
+// Période de chasse déclarée, par mode : début, fin, et prochaine date si rien aujourd'hui.
+function affichePeriode() {
+  const auj = iso(new Date());
+  const toutesSaisons = donnees.periodes ?? [];
+  if (!toutesSaisons.length) return;
+  const enCours = toutesSaisons.filter((p) => p.fin >= auj);
+  const derniere = Math.max(...toutesSaisons.map((p) => p.saison));
+  const lignes = enCours.length ? enCours : toutesSaisons.filter((p) => p.saison === derniere);
+  const debut = lignes.reduce((m, p) => (p.debut < m ? p.debut : m), lignes[0].debut);
+  const fin = lignes.reduce((m, p) => (p.fin > m ? p.fin : m), lignes[0].fin);
+  const suite = prochaine(['B', 'A', 'X'], decale(auj, -1));
+
+  let titre;
+  if (!suite) titre = `<strong>Hors période</strong> · dernière chasse déclarée le ${courte(fin)}, prochaine saison pas encore déclarée`;
+  else if (auj < debut) titre = `<strong>Hors période</strong> · les chasses commencent le ${courte(debut)}`;
+  else titre = `<strong>Période de chasse</strong> · du ${courte(debut)} au ${courte(fin)}`;
+  $('#periode summary').innerHTML = titre;
+
+  $('#periode ul').innerHTML = lignes
+    .map((p) => {
+      const pro = prochaine([p.mode], decale(auj, -1));
+      let etat;
+      if (auj > p.fin || !pro) etat = 'terminé pour cette saison';
+      else if (pro === auj) etat = "en cours, chasses déclarées aujourd'hui";
+      else if (auj < p.debut) etat = `pas commencé, première le ${longue(pro)}`;
+      else etat = `en cours, prochaine le ${longue(pro)}`;
+      const saison = lignes.some((l) => l.saison !== p.saison) ? ` (saison ${p.saison}-${p.saison + 1})` : '';
+      return `<li><b style="background:${COULEURS[p.mode]}"></b>${LIBELLES[p.mode]}${saison} <span>du ${courte(p.debut)} au ${courte(p.fin)} · ${p.n} chasses déclarées</span><em>${etat}</em></li>`;
+    })
+    .join('');
+  $('#periode').hidden = false;
 }
 
 // Chasses déclarées dont le territoire n'a pas de tracé public : affichées en texte.
@@ -226,6 +289,7 @@ async function charge() {
     $(id).max = m.fin;
     $(id).value = periode.debut;
   }
+  affichePeriode();
   dessine();
 }
 

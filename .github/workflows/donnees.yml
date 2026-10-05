@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
   pages: write
   id-token: write
 
@@ -28,6 +29,11 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/build-data.mjs
+      # GitHub suspend les tâches planifiées d'un dépôt sans activité depuis 60 jours :
+      # réactiver le workflow à chaque passage remet ce compteur à zéro.
+      - run: gh workflow enable donnees.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
       - run: rm -rf .git .github scripts
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -3,7 +3,6 @@
 import { writeFile, mkdir } from 'node:fs/promises';
 
 const BASE = 'https://geoservices.wallonie.be/arcgis/rest/services/FAUNE_FLORE/CHASSE_TERRIT_ANONYM/MapServer';
-const JOURS = Number(process.env.JOURS ?? 21);
 const LOT = 100; // territoires par requête de géométrie
 
 const isoBruxelles = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels' }).format(d);
@@ -36,7 +35,8 @@ async function requete(couche, params) {
 const MODES = { Battue: 'B', Affut: 'A', Autre: 'X' };
 
 const debut = isoBruxelles(new Date());
-const fin = plusJours(debut, JOURS);
+// Jusqu'à la fin de la saison de chasse (30 juin).
+const fin = `${Number(debut.slice(0, 4)) + (debut.slice(5) >= '07-01' ? 1 : 0)}-07-01`;
 
 // 1. Dates de chasse, jour par jour (reste sous la limite de 2000 enregistrements).
 const parTerritoire = new Map();
@@ -104,7 +104,7 @@ const sortie = {
     genere: new Date().toISOString(),
     extractionDNF: extraction ? new Date(extraction).toISOString() : null,
     debut,
-    fin: plusJours(fin, -1),
+    fin: [...parTerritoire.values()].flat().reduce((m, d) => (d[0] > m ? d[0] : m), debut), // dernière chasse déclarée
     chasses: [...parTerritoire.values()].reduce((n, d) => n + d.length, 0),
     territoiresDeclares: cles.length,
     territoiresSansGeometrie: sansTrace.length,

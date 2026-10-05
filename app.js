@@ -53,6 +53,8 @@ function bornes(p) {
   const auj = iso(new Date());
   if (p === 'demain') return { debut: decale(auj, 1), fin: decale(auj, 1) };
   if (p === 'semaine') return { debut: auj, fin: decale(auj, 6) };
+  if (p === 'mois') return { debut: auj, fin: decale(auj, 29) };
+  if (p === 'saison') return { debut: auj, fin: donnees?.meta.fin ?? auj };
   if (p === 'weekend') {
     const j = new Date(auj + 'T12:00:00Z').getUTCDay(); // 0 = dimanche
     if (j === 0) return { debut: auj, fin: auj };
@@ -157,12 +159,23 @@ function verifiePosition() {
 function choisit(p) {
   periode = typeof p === 'string' ? bornes(p) : p;
   document.querySelectorAll('#periodes button').forEach((b) => b.classList.toggle('actif', b.dataset.p === p));
-  if (typeof p === 'string') $('#date').value = '';
+  const perso = typeof p !== 'string';
+  document.querySelectorAll('.plage').forEach((l) => l.classList.toggle('actif', perso));
+  $('#du').value = periode.debut;
+  $('#au').value = periode.fin;
   dessine();
 }
 
 document.querySelectorAll('#periodes button').forEach((b) => b.addEventListener('click', () => choisit(b.dataset.p)));
-$('#date').addEventListener('change', (e) => e.target.value && choisit({ debut: e.target.value, fin: e.target.value }));
+// Plage libre : si une borne dépasse l'autre, on ramène l'autre sur la même date.
+$('#du').addEventListener('change', (e) => {
+  const debut = e.target.value;
+  if (debut) choisit({ debut, fin: periode.fin < debut ? debut : periode.fin });
+});
+$('#au').addEventListener('change', (e) => {
+  const fin = e.target.value;
+  if (fin) choisit({ debut: periode.debut > fin ? fin : periode.debut, fin });
+});
 $('#modes').addEventListener('change', dessine);
 
 $('#position').addEventListener('click', () => {
@@ -207,9 +220,12 @@ async function charge() {
   const perime = m.debut < iso(new Date());
   etat.className = perime ? 'perime' : '';
   etat.textContent =
-    `${perime ? '⚠ Données non rafraîchies · ' : ''}DNF au ${fmt(m.extractionDNF)}, récupéré le ${fmt(m.genere)} · jusqu'au ${lisible(m.fin)}`;
-  $('#date').min = m.debut;
-  $('#date').max = m.fin;
+    `${perime ? '⚠ Données non rafraîchies · ' : ''}DNF au ${fmt(m.extractionDNF)}, récupéré le ${fmt(m.genere)} · chasses déclarées jusqu'au ${new Date(m.fin + 'T12:00:00Z').toLocaleDateString('fr-BE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}`;
+  for (const id of ['#du', '#au']) {
+    $(id).min = m.debut;
+    $(id).max = m.fin;
+    $(id).value = periode.debut;
+  }
   dessine();
 }
 

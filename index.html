@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f2a24">
+<title>Chasses du jour · Wallonie</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div id="periodes" role="group" aria-label="Période">
+    <button data-p="jour" class="actif">Aujourd'hui</button>
+    <button data-p="demain">Demain</button>
+    <button data-p="weekend">Week-end</button>
+    <button data-p="semaine">7 jours</button>
+    <input type="date" id="date" aria-label="Choisir une date">
+  </div>
+  <div id="modes" role="group" aria-label="Modes de chasse">
+    <label class="m-B"><input type="checkbox" value="B" checked><i></i>Battue</label>
+    <label class="m-A"><input type="checkbox" value="A" checked><i></i>Affût</label>
+    <label class="m-X"><input type="checkbox" value="X" checked><i></i>Autre</label>
+    <span id="compte"></span>
+  </div>
+</header>
+<div id="alerte" hidden></div>
+<details id="sanstrace" hidden>
+  <summary></summary>
+  <p>Le DNF a enregistré ces chasses mais ne publie pas le contour du territoire. Elles ne peuvent pas être situées plus précisément.</p>
+  <ul></ul>
+</details>
+<main id="carte"></main>
+<button id="position" aria-label="Ma position" title="Ma position">◎</button>
+<footer>
+  <span id="etat">Chargement…</span>
+  <span>Les panneaux sur le terrain priment toujours.</span>
+</footer>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "name": "Chasses du jour · Wallonie",
+  "short_name": "Chasses",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#1f2a24",
+  "theme_color": "#1f2a24",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

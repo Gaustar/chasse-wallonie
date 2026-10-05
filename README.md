@@ -17,6 +17,14 @@ Fonds de carte : topographique IGN/NGI (CartoWeb), orthophotos SPW (`IMAGERIE/OR
 
 La période affichée (début et fin par mode) vient des premières et dernières dates déclarées de la saison, pas des dates légales d'ouverture. Rien n'est lié à une année : le script suit la saison publiée par le DNF et le workflow se réactive lui-même pour ne pas être suspendu.
 
+## Calendrier
+
+`ics.js` (partagé par le site et le build) produit des fichiers iCalendar : journées entières (le DNF ne publie pas d'heures), identifiants stables, jours consécutifs regroupés en période.
+
+- Téléchargement depuis le site : zone visible, cantonnement, Wallonie ou territoire ; période affichée ou saison ; résumé par jour ou détail par territoire ; rappel optionnel.
+- Abonnements régénérés à chaque build dans `cal/` : `wallonie.ics`, `cantonnement-<code>.ics` (+ `-detail`), `t/<lot>.ics`.
+- Les événements renvoient vers la carte par lien profond : `#du=AAAA-MM-JJ&au=AAAA-MM-JJ&lot=<lot>` ou `&can=<code>`.
+
 ## Utilisation locale
 
 ```bash

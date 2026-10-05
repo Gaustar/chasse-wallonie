@@ -36,7 +36,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
       # Chaque déploiement donne une adresse neuve au script et au style : le navigateur
       # ne peut pas marier une nouvelle page avec un ancien script resté en cache.
-      - run: sed -i "s/app\.js\"/app.js?v=${GITHUB_SHA::8}\"/; s/style\.css\"/style.css?v=${GITHUB_SHA::8}\"/" index.html
+      - run: sed -i "s/app\.js\"/app.js?v=${GITHUB_SHA::8}\"/; s/ics\.js\"/ics.js?v=${GITHUB_SHA::8}\"/; s/style\.css\"/style.css?v=${GITHUB_SHA::8}\"/" index.html
       - run: rm -rf .git .github scripts
       - uses: actions/upload-pages-artifact@v3
         with:

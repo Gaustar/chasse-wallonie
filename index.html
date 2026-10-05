@@ -21,12 +21,14 @@
     <button data-p="saison">Saison</button>
     <label class="plage">Du <input type="date" id="du"></label>
     <label class="plage">au <input type="date" id="au"></label>
+    <button id="raz" type="button" hidden>✕ Réinitialiser</button>
   </div>
   <div id="modes" role="group" aria-label="Modes de chasse">
     <label class="m-B"><input type="checkbox" value="B" checked><i></i>Battue</label>
     <label class="m-A"><input type="checkbox" value="A" checked><i></i>Affût</label>
     <label class="m-X"><input type="checkbox" value="X" checked><i></i>Autre</label>
     <span id="compte"></span>
+    <button id="ouvre-cal" type="button">📅 Calendrier</button>
   </div>
 </header>
 <details id="periode" hidden>
@@ -41,12 +43,55 @@
   <ul></ul>
 </details>
 <main id="carte"></main>
+<dialog id="cal">
+  <form method="dialog">
+    <h2>Ajouter au calendrier</h2>
+    <fieldset>
+      <legend>Zone</legend>
+      <label id="cal-lot" hidden><input type="radio" name="zone" value="lot"> <span></span></label>
+      <label><input type="radio" name="zone" value="vue" checked> Territoires visibles à l'écran</label>
+      <label><input type="radio" name="zone" value="can"> Cantonnement <select id="cal-can" aria-label="Cantonnement"></select></label>
+      <label><input type="radio" name="zone" value="tout"> Toute la Wallonie</label>
+    </fieldset>
+    <fieldset>
+      <legend>Période</legend>
+      <label><input type="radio" name="quand" value="filtre" checked> <span id="cal-filtre"></span></label>
+      <label><input type="radio" name="quand" value="saison"> Toute la saison à venir</label>
+    </fieldset>
+    <fieldset>
+      <legend>Événements</legend>
+      <label><input type="radio" name="detail" value="jour" checked> Un résumé par jour</label>
+      <label><input type="radio" name="detail" value="territoire"> Un par territoire (jours consécutifs regroupés en période)</label>
+    </fieldset>
+    <label class="ligne">Rappel
+      <select id="cal-rappel">
+        <option value="">Aucun</option>
+        <option value="veille">La veille à 18 h</option>
+        <option value="matin">Le jour même à 7 h</option>
+      </select>
+    </label>
+    <p id="cal-bilan" aria-live="polite"></p>
+    <button type="button" id="cal-dl" class="principal">Télécharger le fichier (.ics)</button>
+    <p class="note">Le fichier est une photo des déclarations à cet instant : il ne suivra pas les changements. Le réimporter met à jour les événements sans les dupliquer.</p>
+    <div id="cal-abo">
+      <h3>Ou s'abonner : mise à jour automatique</h3>
+      <p class="note" id="cal-abo-note"></p>
+      <div class="boutons">
+        <a id="cal-webcal">Apple · Outlook</a>
+        <a id="cal-google" target="_blank" rel="noopener">Google Agenda</a>
+        <button type="button" id="cal-copie">Copier l'adresse</button>
+      </div>
+    </div>
+    <button value="fermer" class="fermer">Fermer</button>
+  </form>
+</dialog>
 <button id="position" aria-label="Ma position" title="Ma position">◎</button>
 <footer>
   <span id="etat">Chargement…</span>
   <span>Les panneaux sur le terrain priment toujours.</span>
 </footer>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="ics.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

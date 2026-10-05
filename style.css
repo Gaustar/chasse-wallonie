@@ -31,6 +31,9 @@ header { padding: 8px 10px 6px; padding-top: max(8px, env(safe-area-inset-top));
 .plage input { border: 0; background: transparent; color: var(--texte); font: inherit; color-scheme: dark; }
 .plage.actif { border-color: var(--texte); color: var(--texte); }
 #periodes button.actif { background: var(--texte); color: var(--fond); border-color: var(--texte); font-weight: 600; }
+#raz { border-style: dashed; color: var(--discret); }
+#raz[hidden] { display: none; }
+#ouvre-cal { min-height: 32px; padding: 0 10px; border: 1px solid #4a5a50; border-radius: 16px; background: transparent; color: var(--texte); font: inherit; white-space: nowrap; }
 #modes { display: flex; align-items: center; gap: 14px; margin-top: 6px; min-height: 32px; font-size: 14px; }
 #modes label { display: flex; align-items: center; gap: 5px; }
 #modes input { position: absolute; opacity: 0; }
@@ -96,3 +99,23 @@ footer {
 .leaflet-popup-content li b { flex: none; width: 10px; height: 10px; border-radius: 50%; }
 .leaflet-popup-content li.hors { opacity: .5; }
 .leaflet-popup-content small { color: #777; margin-left: auto; white-space: nowrap; }
+
+dialog#cal { width: min(480px, calc(100vw - 20px)); max-height: calc(100dvh - 20px); padding: 16px; border: 0; border-radius: 14px; background: #f6f7f3; color: #1f2a24; font: 15px/1.35 system-ui, sans-serif; }
+dialog#cal::backdrop { background: #000a; }
+#cal h2 { margin: 0 0 10px; font-size: 18px; }
+#cal h3 { margin: 14px 0 4px; font-size: 15px; }
+#cal fieldset { margin: 0 0 10px; padding: 0; border: 0; }
+#cal legend { padding: 0; font-weight: 600; margin-bottom: 2px; }
+#cal fieldset label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 36px; }
+#cal fieldset label[hidden] { display: none; }
+#cal select { min-height: 36px; max-width: 100%; font: inherit; }
+#cal .ligne { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+#cal-bilan { margin: 12px 0 8px; font-weight: 600; }
+#cal .note { margin: 6px 0; font-size: 13px; color: #55605a; }
+#cal .principal, #cal .boutons a, #cal .boutons button, #cal .fermer { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 16px; border: 1px solid #1f2a24; border-radius: 22px; background: transparent; color: #1f2a24; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+#cal .principal { width: 100%; background: #1f2a24; color: #f1f4ee; }
+#cal .principal:disabled { opacity: .4; cursor: default; }
+#cal .boutons { display: flex; flex-wrap: wrap; gap: 8px; }
+#cal .boutons[hidden] { display: none; }
+#cal .fermer { width: 100%; margin-top: 14px; border-color: #b9c0b8; }
+.leaflet-popup-content .vers-cal { display: inline-block; margin-top: 8px; font-weight: 600; }

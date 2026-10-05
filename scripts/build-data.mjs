@@ -1,6 +1,7 @@
 // Génère data/chasses.json à partir du service officiel SPW/DNF
 // (territoires de chasse anonymisés + table des dates de chasse déclarées).
-import { writeFile, mkdir } from 'node:fs/promises';
+import { writeFile, mkdir, rm } from 'node:fs/promises';
+import '../ics.js'; // définit globalThis.ICS
 
 const BASE = 'https://geoservices.wallonie.be/arcgis/rest/services/FAUNE_FLORE/CHASSE_TERRIT_ANONYM/MapServer';
 const LOT = 100; // territoires par requête de géométrie
@@ -68,7 +69,7 @@ const features = [];
 for (let i = 0; i < cles.length; i += LOT) {
   const j = await requete(0, {
     where: `KEYG IN (${cles.slice(i, i + LOT).map((k) => `'${k.replace(/'/g, "''")}'`).join(',')})`,
-    outFields: 'KEYG,N_LOT,UGC_NOM,SERVICE',
+    outFields: 'KEYG,N_LOT,UGC_NOM,SERVICE,CAN',
     outSR: '4326',
     geometryPrecision: '5', // ~1 m
     maxAllowableOffset: '0.00001', // ~1 m : retire seulement les points redondants
@@ -77,6 +78,12 @@ for (let i = 0; i < cles.length; i += LOT) {
   for (const f of j.features) {
     if (!f.geometry) continue;
     const p = f.properties;
+    // Centre de l'emprise : sert de repère (GEO) aux événements de calendrier.
+    let [o, s, e, n] = [Infinity, Infinity, -Infinity, -Infinity];
+    (function parcourt(c) {
+      if (typeof c[0] !== 'number') return c.forEach(parcourt);
+      o = Math.min(o, c[0]); e = Math.max(e, c[0]); s = Math.min(s, c[1]); n = Math.max(n, c[1]);
+    })(f.geometry.coordinates);
     features.push({
       type: 'Feature',
       geometry: f.geometry,
@@ -84,6 +91,8 @@ for (let i = 0; i < cles.length; i += LOT) {
         lot: p.N_LOT,
         ugc: p.UGC_NOM,
         cant: p.SERVICE,
+        can: p.CAN,
+        c: [+((s + n) / 2).toFixed(5), +((o + e) / 2).toFixed(5)],
         d: parTerritoire.get(p.KEYG).sort((a, b) => a[0].localeCompare(b[0])),
       },
     });
@@ -101,7 +110,7 @@ const cantons = new Map(
 const sansTrace = cles
   .map((k) => ({ lot: k.split('/')[1], d: parTerritoire.get(k).sort((a, b) => a[0].localeCompare(b[0])) }))
   .filter((t) => !trouves.has(t.lot))
-  .map((t) => ({ ...t, cant: cantons.get(t.lot.slice(0, 3)) ?? null }))
+  .map((t) => ({ ...t, can: cantons.has(t.lot.slice(0, 3)) ? t.lot.slice(0, 3) : null, cant: cantons.get(t.lot.slice(0, 3)) ?? null }))
   .sort((a, b) => a.lot.localeCompare(b.lot));
 // 4. Période déclarée par saison et par mode (première et dernière date, chasses passées comprises).
 const jourUTC = (ms) => new Date(ms).toISOString().slice(0, 10);
@@ -145,4 +154,26 @@ const sortie = {
 
 await mkdir(new URL('../data/', import.meta.url), { recursive: true });
 await writeFile(new URL('../data/chasses.json', import.meta.url), JSON.stringify(sortie));
-console.log(sortie.meta);
+
+// 5. Calendriers d'abonnement (.ics) : Wallonie, par cantonnement, par territoire.
+const SITE = process.env.SITE ?? (process.env.GITHUB_REPOSITORY
+  ? `https://${process.env.GITHUB_REPOSITORY.split('/')[0].toLowerCase()}.github.io/${process.env.GITHUB_REPOSITORY.split('/')[1]}/`
+  : 'https://gaustar.github.io/chasse-wallonie/');
+const { ICS } = globalThis;
+const liste = ICS.territoires(sortie);
+const opt = { base: SITE, source: new Date(sortie.meta.extractionDNF ?? Date.now()).toLocaleDateString('fr-BE', { timeZone: 'Europe/Brussels' }) };
+const cal = new URL('../cal/', import.meta.url);
+await rm(cal, { recursive: true, force: true });
+await mkdir(new URL('t/', cal), { recursive: true });
+const ecrit = (nom, titre, description, evts) => writeFile(new URL(nom, cal), ICS.fichier(titre, description, evts));
+const NOTE = 'Chasses déclarées au DNF (SPW), mises à jour automatiquement. Les panneaux sur le terrain priment toujours.';
+
+await ecrit('wallonie.ics', 'Chasses · Wallonie', NOTE, ICS.parJour(liste, { ...opt, portee: 'Wallonie', cle: 'wallonie' }));
+for (const [can, service] of cantons) {
+  const dedans = liste.filter((t) => t.can === can);
+  const nom = ICS.nomCantonnement(service);
+  await ecrit(`cantonnement-${can}.ics`, `Chasses · ${nom}`, NOTE, ICS.parJour(dedans, { ...opt, portee: `cantonnement de ${nom}`, cle: `can${can}`, can }));
+  await ecrit(`cantonnement-${can}-detail.ics`, `Chasses · ${nom} (par territoire)`, NOTE, ICS.parTerritoire(dedans, opt));
+}
+for (const t of liste) await ecrit(`t/${t.lot}.ics`, `Chasses · territoire ${t.lot}`, NOTE, ICS.parTerritoire([t], opt));
+console.log(sortie.meta, { calendriers: 1 + 2 * cantons.size + liste.length });

@@ -204,7 +204,7 @@ function infobulle(f) {
       return `<li${hors}><b style="background:${COULEURS[m]}"></b>${lisible(j)} · ${LIBELLES[m]}<small>${ferme ? 'chemins fermés' : 'sans fermeture'}</small></li>`;
     })
     .join('');
-  return `<h3>Territoire ${esc(p.lot)}</h3><p>${esc([p.ugc, p.cant].filter(Boolean).join(' · '))}</p><ul>${lignes}</ul>`;
+  return `<h3>Territoire ${esc(p.lot)}</h3><p>${esc([p.ugc, p.cant].filter(Boolean).join(' · '))}</p><ul>${lignes}</ul><a href="#" class="vers-cal" data-lot="${esc(p.lot)}">📅 Ajouter au calendrier</a>`;
 }
 
 // Point dans un polygone GeoJSON (anneaux extérieurs et trous).
@@ -244,6 +244,7 @@ function choisit(p) {
   document.querySelectorAll('#periodes button').forEach((b) => b.classList.toggle('actif', b.dataset.p === p));
   const perso = typeof p !== 'string';
   document.querySelectorAll('.plage').forEach((l) => l.classList.toggle('actif', perso));
+  $('#raz').hidden = !perso;
   $('#du').value = periode.debut;
   $('#au').value = periode.fin;
   dessine();
@@ -259,6 +260,7 @@ $('#au').addEventListener('change', (e) => {
   const fin = e.target.value;
   if (fin) choisit({ debut: periode.debut > fin ? fin : periode.debut, fin });
 });
+$('#raz').addEventListener('click', () => choisit('jour'));
 $('#modes').addEventListener('change', dessine);
 
 $('#position').addEventListener('click', () => {
@@ -310,8 +312,172 @@ async function charge() {
     $(id).value = periode.debut;
   }
   affichePeriode();
-  dessine();
+  prepareCalendrier();
+  if (!lienProfond()) dessine();
 }
+
+// ---- Liens profonds : #du=2026-10-11&au=2026-10-11&lot=9223075022 (ou &can=922), utilisés par les événements de calendrier.
+function lienProfond() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  const jour = /^\d{4}-\d{2}-\d{2}$/;
+  const du = p.get('du');
+  const au = p.get('au') ?? du;
+  if (!jour.test(du ?? '') || !jour.test(au ?? '') || au < du) return false;
+  choisit({ debut: du, fin: au });
+  const cible = couche.getLayers().filter((l) => {
+    const pr = l.feature.properties;
+    return p.has('lot') ? pr.lot === p.get('lot') : p.has('can') ? pr.can === p.get('can') : false;
+  });
+  if (cible.length) {
+    carte.fitBounds(L.featureGroup(cible).getBounds(), { maxZoom: 15, padding: [20, 20] });
+    if (p.has('lot')) cible[0].openPopup();
+  }
+  return true;
+}
+window.addEventListener('hashchange', () => donnees && lienProfond());
+
+// ---- Export calendrier
+const SITE = location.origin + location.pathname.replace(/[^/]*$/, '');
+let lotChoisi = null;
+const champ = (nom) => document.querySelector(`#cal input[name=${nom}]:checked`).value;
+
+function prepareCalendrier() {
+  const cantons = new Map();
+  for (const t of ICS.territoires(donnees)) if (t.can && t.cant) cantons.set(t.can, ICS.nomCantonnement(t.cant));
+  $('#cal-can').innerHTML = [...cantons]
+    .sort((a, b) => a[1].localeCompare(b[1], 'fr'))
+    .map(([can, nom]) => `<option value="${esc(can)}">${esc(nom)}</option>`)
+    .join('');
+  const prefere = memoire('canton', null);
+  if (cantons.has(prefere)) $('#cal-can').value = prefere;
+}
+
+// Emprise de chaque polygone, calculée une fois, pour savoir ce qui est à l'écran.
+const emprises = new WeakMap();
+function emprise(f) {
+  if (!emprises.has(f)) emprises.set(f, L.geoJSON(f).getBounds());
+  return emprises.get(f);
+}
+
+// Ce que l'utilisateur a choisi dans la fenêtre : territoires, événements, abonnement possible.
+function selection() {
+  const zone = champ('zone');
+  const detail = champ('detail');
+  const toute = champ('quand') === 'saison';
+  let liste = ICS.territoires(donnees);
+  const opt = { base: SITE, source: new Date(donnees.meta.extractionDNF ?? donnees.meta.genere).toLocaleDateString('fr-BE') };
+  let abo = null;
+  let nom = 'Wallonie';
+  let pourquoi = '';
+
+  if (zone === 'lot') {
+    liste = liste.filter((t) => t.lot === lotChoisi);
+    nom = `territoire ${lotChoisi}`;
+    Object.assign(opt, { portee: nom, cle: `lot${lotChoisi}` });
+    abo = `cal/t/${lotChoisi}.ics`;
+  } else if (zone === 'can') {
+    const can = $('#cal-can').value;
+    liste = liste.filter((t) => t.can === can);
+    nom = `cantonnement de ${$('#cal-can').selectedOptions[0]?.textContent ?? can}`;
+    Object.assign(opt, { portee: nom, cle: `can${can}`, can });
+    abo = `cal/cantonnement-${can}${detail === 'territoire' ? '-detail' : ''}.ics`;
+  } else if (zone === 'vue') {
+    const ecran = carte.getBounds();
+    const visibles = new Set(donnees.features.filter((f) => emprise(f).intersects(ecran)).map((f) => f.properties.lot));
+    liste = liste.filter((t) => visibles.has(t.lot));
+    nom = 'zone affichée';
+    Object.assign(opt, { portee: 'zone choisie sur la carte', cle: 'zone' });
+    pourquoi = "Pas d'abonnement pour une zone dessinée à l'écran : choisissez un cantonnement ou un territoire pour un calendrier qui se met à jour.";
+  } else {
+    Object.assign(opt, { portee: 'Wallonie', cle: 'wallonie' });
+    if (detail === 'jour') abo = 'cal/wallonie.ics';
+    else pourquoi = "Pas d'abonnement détaillé pour toute la Wallonie (plusieurs milliers d'événements) : prenez le résumé par jour ou un cantonnement.";
+  }
+
+  liste = ICS.filtre(liste, toute ? { modes: modesActifs() } : { debut: periode.debut, fin: periode.fin, modes: modesActifs() });
+  const evts = detail === 'territoire' ? ICS.parTerritoire(liste, opt) : ICS.parJour(liste, opt);
+  const du = toute ? donnees.meta.debut : periode.debut;
+  const au = toute ? donnees.meta.fin : periode.fin;
+  return { evts, nom, abo, pourquoi, zone, territoires: liste.length, du, au };
+}
+
+function majCalendrier() {
+  $('#cal-filtre').textContent = periode.debut === periode.fin ? `Le ${courte(periode.debut)} (période affichée)` : `Du ${courte(periode.debut)} au ${courte(periode.fin)} (période affichée)`;
+  const s = selection();
+  const n = s.evts.length;
+  $('#cal-bilan').textContent = n
+    ? `${n} événement${n > 1 ? 's' : ''} · ${s.territoires} territoire${s.territoires > 1 ? 's' : ''} · ${s.nom}` + (n > 1500 ? ' — beaucoup pour un agenda, préférez le résumé par jour.' : '')
+    : `Aucune chasse déclarée pour ce choix (${s.nom}).`;
+  $('#cal-dl').disabled = !n;
+  $('#cal .boutons').hidden = !s.abo;
+  if (s.abo) {
+    const adresse = SITE + s.abo;
+    $('#cal-webcal').href = adresse.replace(/^https?:/, 'webcal:');
+    $('#cal-google').href = `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(adresse.replace(/^https:/, 'http:'))}`;
+    $('#cal-copie').dataset.adresse = adresse;
+    $('#cal-abo-note').textContent = `Calendrier du ${s.nom}, toute la saison et tous les modes, régénéré trois fois par jour. Votre agenda le relit à son propre rythme (souvent une fois par jour). Sans rappel.`;
+  } else {
+    $('#cal-abo-note').textContent = s.pourquoi;
+  }
+}
+
+function ouvreCalendrier(lot) {
+  lotChoisi = lot ?? null;
+  $('#cal-lot').hidden = !lotChoisi;
+  $('#cal-lot span').textContent = lotChoisi ? `Territoire ${lotChoisi}` : '';
+  if (lotChoisi) {
+    document.querySelector('#cal input[value=lot]').checked = true;
+    document.querySelector('#cal input[value=territoire]').checked = true;
+    document.querySelector('#cal input[value=saison]').checked = true;
+  } else if (champ('zone') === 'lot') {
+    document.querySelector('#cal input[value=vue]').checked = true;
+  }
+  majCalendrier();
+  $('#cal').showModal();
+}
+
+$('#ouvre-cal').addEventListener('click', () => donnees && ouvreCalendrier());
+document.addEventListener('click', (e) => {
+  const lien = e.target.closest('.vers-cal');
+  if (!lien) return;
+  e.preventDefault();
+  ouvreCalendrier(lien.dataset.lot);
+});
+$('#cal').addEventListener('change', (e) => {
+  if (e.target.id === 'cal-can') {
+    document.querySelector('#cal input[value=can]').checked = true;
+    retient('canton', e.target.value);
+  }
+  majCalendrier();
+});
+$('#cal-dl').addEventListener('click', async () => {
+  const s = selection();
+  const titre = `Chasses · ${s.nom}`;
+  const contenu = ICS.fichier(titre, 'Chasses déclarées au DNF (SPW). Les panneaux sur le terrain priment toujours.', s.evts, { rappel: $('#cal-rappel').value });
+  const nomFichier = `chasses-${s.nom.replace(/[^a-z0-9à-ÿ]+/gi, '-').toLowerCase()}-${s.du}_${s.au}.ics`;
+  const fichier = new File([contenu], nomFichier, { type: 'text/calendar' });
+  // Sur téléphone, le partage propose directement l'application d'agenda.
+  if (matchMedia('(pointer: coarse)').matches && navigator.canShare?.({ files: [fichier] })) {
+    try {
+      await navigator.share({ files: [fichier], title: titre });
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+    }
+  }
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(fichier), download: nomFichier });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+});
+$('#cal-copie').addEventListener('click', async (e) => {
+  try {
+    await navigator.clipboard.writeText(e.target.dataset.adresse);
+    e.target.textContent = 'Adresse copiée';
+  } catch {
+    e.target.textContent = e.target.dataset.adresse;
+  }
+  setTimeout(() => (e.target.textContent = "Copier l'adresse"), 4000);
+});
 
 // Une erreur de script ne doit jamais laisser une carte vide sans explication.
 function signale(e) {

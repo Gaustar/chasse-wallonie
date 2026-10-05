@@ -3,6 +3,7 @@ const LIBELLES = { B: 'Battue', A: 'Affût', X: 'Autre' };
 const GRAVITE = ['B', 'X', 'A']; // couleur retenue quand plusieurs modes tombent dans la période
 
 const $ = (s) => document.querySelector(s);
+const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const iso = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels' }).format(d);
 const decale = (jour, n) => {
   const d = new Date(jour + 'T12:00:00Z');
@@ -12,7 +13,17 @@ const decale = (jour, n) => {
 const lisible = (jour) =>
   new Date(jour + 'T12:00:00Z').toLocaleDateString('fr-BE', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 
-const carte = L.map('carte', { zoomControl: false }).setView([50.25, 5.2], 9);
+const memoire = (cle, defaut) => {
+  try { return JSON.parse(localStorage.getItem(cle)) ?? defaut; } catch { return defaut; }
+};
+const retient = (cle, valeur) => {
+  try { localStorage.setItem(cle, JSON.stringify(valeur)); } catch {}
+};
+
+// Canvas : des centaines de territoires détaillés restent fluides sur téléphone.
+const vue = memoire('vue', { c: [49.82, 5.0], z: 11 }); // Corbion et la frontière
+const carte = L.map('carte', { zoomControl: false, renderer: L.canvas({ padding: 0.3, tolerance: 6 }) }).setView(vue.c, vue.z);
+carte.on('moveend', () => retient('vue', { c: [carte.getCenter().lat, carte.getCenter().lng], z: carte.getZoom() }));
 L.control.zoom({ position: 'bottomleft' }).addTo(carte);
 L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(carte);
 const CREDIT = 'Données chasse : SPW – DNF';
@@ -22,27 +33,36 @@ const Ortho = L.TileLayer.extend({
     const t = 20037508.342789244;
     const pas = (2 * t) / 2 ** c.z;
     const bbox = [-t + c.x * pas, t - (c.y + 1) * pas, -t + (c.x + 1) * pas, t - c.y * pas].join(',');
-    return `https://geoservices.wallonie.be/arcgis/rest/services/IMAGERIE/ORTHO_LAST/MapServer/export?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=512,512&format=jpg&f=image`;
+    return `https://geoservices.wallonie.be/arcgis/rest/services/IMAGERIE/ORTHO_LAST/MapServer/export?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=512,512&format=png32&transparent=true&f=image`;
   },
 });
+const geopf = (couche, format) =>
+  `https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${couche}&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=${format}`;
+// Les fonds belges sont transparents hors de Belgique : on les pose sur leur équivalent français
+// pour couvrir les deux côtés de la frontière.
 const fonds = {
-  'Carte IGN': L.tileLayer('https://cartoweb.wmts.ngi.be/1.0.0/topo/default/3857/{z}/{y}/{x}.png', {
-    maxNativeZoom: 17,
-    maxZoom: 20,
-    attribution: `© IGN/NGI · ${CREDIT}`,
-  }),
-  'Photo aérienne': new Ortho('', { maxZoom: 20, attribution: `Orthophotos © SPW · ${CREDIT}` }),
+  'Carte IGN': L.layerGroup([
+    L.tileLayer(geopf('GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2', 'image/png'), { maxNativeZoom: 19, maxZoom: 20, attribution: `© IGN France` }),
+    L.tileLayer('https://cartoweb.wmts.ngi.be/1.0.0/topo/default/3857/{z}/{y}/{x}.png', {
+      maxNativeZoom: 17,
+      maxZoom: 20,
+      attribution: `© IGN/NGI Belgique · ${CREDIT}`,
+    }),
+  ]),
+  'Photo aérienne': L.layerGroup([
+    L.tileLayer(geopf('ORTHOIMAGERY.ORTHOPHOTOS', 'image/jpeg'), { maxNativeZoom: 19, maxZoom: 20, attribution: `© IGN France` }),
+    new Ortho('', { maxZoom: 20, attribution: `Orthophotos © SPW · ${CREDIT}` }),
+  ]),
   Relief: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
     maxNativeZoom: 17,
     maxZoom: 20,
     attribution: `© OpenStreetMap, SRTM · © OpenTopoMap (CC-BY-SA) · ${CREDIT}`,
   }),
 };
-let fondChoisi = 'Carte IGN';
-try { fondChoisi = localStorage.getItem('fond') in fonds ? localStorage.getItem('fond') : fondChoisi; } catch {}
-fonds[fondChoisi].addTo(carte);
+const fondChoisi = memoire('fond', 'Carte IGN');
+fonds[fondChoisi in fonds ? fondChoisi : 'Carte IGN'].addTo(carte);
 L.control.layers(fonds, null, { position: 'topright' }).addTo(carte);
-carte.on('baselayerchange', (e) => { try { localStorage.setItem('fond', e.name); } catch {} });
+carte.on('baselayerchange', (e) => retient('fond', e.name));
 
 let donnees = null;
 let couche = null;
@@ -171,7 +191,7 @@ function listeSansTrace(modes) {
       const dates = t.actives
         .map(([j, m, ferme]) => `<span><b style="background:${COULEURS[m]}"></b>${lisible(j)} · ${LIBELLES[m]} · ${ferme ? 'chemins fermés' : 'sans fermeture'}</span>`)
         .join('');
-      return `<li><strong>Territoire ${t.lot}</strong>${t.cant ? `<em>${t.cant} (d'après le numéro de lot)</em>` : ''}${dates}</li>`;
+      return `<li><strong>Territoire ${esc(t.lot)}</strong>${t.cant ? `<em>${esc(t.cant)} (d'après le numéro de lot)</em>` : ''}${dates}</li>`;
     })
     .join('');
 }
@@ -184,7 +204,7 @@ function infobulle(f) {
       return `<li${hors}><b style="background:${COULEURS[m]}"></b>${lisible(j)} · ${LIBELLES[m]}<small>${ferme ? 'chemins fermés' : 'sans fermeture'}</small></li>`;
     })
     .join('');
-  return `<h3>Territoire ${p.lot}</h3><p>${[p.ugc, p.cant].filter(Boolean).join(' · ')}</p><ul>${lignes}</ul>`;
+  return `<h3>Territoire ${esc(p.lot)}</h3><p>${esc([p.ugc, p.cant].filter(Boolean).join(' · '))}</p><ul>${lignes}</ul>`;
 }
 
 // Point dans un polygone GeoJSON (anneaux extérieurs et trous).
@@ -270,7 +290,7 @@ carte.on('locationerror', (e) => {
 async function charge() {
   const etat = $('#etat');
   try {
-    const r = await fetch('data/chasses.json');
+    const r = await fetch('data/chasses.json', { cache: 'no-cache' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     donnees = await r.json();
   } catch (e) {
@@ -280,7 +300,7 @@ async function charge() {
   }
   const m = donnees.meta;
   const fmt = (d) => new Date(d).toLocaleDateString('fr-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' });
-  const perime = m.debut < iso(new Date());
+  const perime = Date.now() - new Date(m.genere) > 36 * 3600 * 1000; // deux mises à jour manquées
   etat.className = perime ? 'perime' : '';
   etat.textContent =
     `${perime ? '⚠ Données non rafraîchies · ' : ''}DNF au ${fmt(m.extractionDNF)}, récupéré le ${fmt(m.genere)} · chasses déclarées jusqu'au ${new Date(m.fin + 'T12:00:00Z').toLocaleDateString('fr-BE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}`;
@@ -292,6 +312,15 @@ async function charge() {
   affichePeriode();
   dessine();
 }
+
+// Une erreur de script ne doit jamais laisser une carte vide sans explication.
+function signale(e) {
+  const etat = $('#etat');
+  etat.className = 'perime';
+  etat.textContent = `⚠ Erreur d'affichage : ${e?.message ?? e}. Rechargez la page.`;
+}
+window.addEventListener('error', (e) => signale(e.error ?? e.message));
+window.addEventListener('unhandledrejection', (e) => signale(e.reason));
 
 charge();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');

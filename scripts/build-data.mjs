@@ -38,6 +38,11 @@ const debut = isoBruxelles(new Date());
 // Jusqu'à la fin de la saison de chasse (30 juin).
 const fin = `${Number(debut.slice(0, 4)) + (debut.slice(5) >= '07-01' ? 1 : 0)}-07-01`;
 
+// Garde-fou : une table vide signale une panne ou une bascule côté SPW. On échoue pour
+// conserver la dernière version publiée plutôt que d'afficher une carte faussement vide.
+const { count } = await requete(1, { where: '1=1', returnCountOnly: 'true', f: 'json' });
+if (!count) throw new Error('table des dates de chasse vide côté SPW');
+
 // 1. Dates de chasse, jour par jour (reste sous la limite de 2000 enregistrements).
 const parTerritoire = new Map();
 let extraction = 0;

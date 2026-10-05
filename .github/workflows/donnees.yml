@@ -2,7 +2,7 @@ name: Mise à jour des données
 
 on:
   schedule:
-    - cron: '15 3,10 * * *' # deux fois par jour (UTC)
+    - cron: '15 3,10,16 * * *' # trois fois par jour (UTC)
   workflow_dispatch:
   push:
     branches: [main]
@@ -34,6 +34,9 @@ jobs:
       - run: gh workflow enable donnees.yml
         env:
           GH_TOKEN: ${{ github.token }}
+      # Chaque déploiement donne une adresse neuve au script et au style : le navigateur
+      # ne peut pas marier une nouvelle page avec un ancien script resté en cache.
+      - run: sed -i "s/app\.js\"/app.js?v=${GITHUB_SHA::8}\"/; s/style\.css\"/style.css?v=${GITHUB_SHA::8}\"/" index.html
       - run: rm -rf .git .github scripts
       - uses: actions/upload-pages-artifact@v3
         with:

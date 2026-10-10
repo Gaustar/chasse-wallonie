@@ -85,6 +85,7 @@ let donnees = null;
 let couche = null;
 let periode = { debut: iso(new Date()), fin: iso(new Date()) };
 let moi = null; // { latlng, marqueur, cercle }
+let lotFiltre = null;
 
 function bornes(p) {
   const auj = iso(new Date());
@@ -153,10 +154,13 @@ const datesDe = (fr) => [
 // Rien sur la période affichée : on annonce la prochaine chasse déclarée.
 function messageVide(modes) {
   const bloc = $('#vide');
-  const rien = !toutes().some(([j, m]) => j >= periode.debut && j <= periode.fin && modes.includes(m));
+  const sources = lotFiltre
+    ? [donnees.features.find((f) => f.properties.lot === lotFiltre)]
+    : donnees.features;
+  const rien = !sources.some((f) => dansPeriode(f, modes).length);
   bloc.hidden = !rien;
   if (!rien) return;
-  const suite = prochaine(modes, periode.fin);
+  const suite = prochaine(modes, periode.fin, sources.map((f) => f.properties.d).flat());
   const bouton = $('#vide button');
   bouton.hidden = !suite;
   if (suite) {
@@ -225,8 +229,6 @@ function listeSansTrace(modes) {
     .join('');
 }
 
-// --- Recherche par lot / cantonnement ---
-let lotFiltre = null;
 const listeRecherche = [];
 
 function preparerRecherche() {
@@ -268,11 +270,14 @@ function afficherResultats(term) {
   if (!res.length) {
     liste.innerHTML = '<div class="item" style="color:var(--discret)">Aucun résultat</div>';
     liste.hidden = false;
+    input.setAttribute('aria-expanded', 'false');
     return;
   }
   res.slice(0, 25).forEach((it, i) => {
     const div = document.createElement('div');
     div.className = 'item' + (i === 0 ? ' actif' : '');
+    div.setAttribute('role', 'option');
+    div.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
     if (it.lot) {
       const pre = it.fr ? 'FR – ' : '';
       div.innerHTML = `<span class="pre">${pre}</span><strong>Territoire ${it.lot}</strong>${it.cant ? ` · <em>${esc(it.cant)}</em>` : ''}`;
@@ -317,6 +322,7 @@ function viderRecherche() {
   $('#recherche-liste').innerHTML = '';
   $('#recherche-liste').hidden = true;
   $('#recherche-clear').hidden = true;
+  input.setAttribute('aria-expanded', 'false');
   dessine();
 }
 
@@ -356,7 +362,10 @@ function verifiePosition() {
   if (!moi || !donnees) return (a.hidden = true);
   const pt = [moi.latlng.lng, moi.latlng.lat];
   const modes = modesActifs();
-  const touche = donnees.features.find((f) => dansPeriode(f, modes).length && contient(f.geometry, pt));
+  const features = lotFiltre
+    ? donnees.features.filter((f) => f.properties.lot === lotFiltre)
+    : donnees.features;
+  const touche = features.find((f) => dansPeriode(f, modes).length && contient(f.geometry, pt));
   a.hidden = false;
   if (touche) {
     const [j, m, ferme] = dansPeriode(touche, modes)[0];
@@ -432,6 +441,10 @@ $('#recherche-liste').addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { viderRecherche(); input.blur(); }
+  if (e.key === 'Enter' && input.value.trim()) {
+    const first = $('#recherche-liste .item:first-child');
+    if (first) { first.click(); e.preventDefault(); }
+  }
 });
 document.addEventListener('click', (e) => {
   if (!e.target.closest('#recherche')) viderRecherche();
@@ -466,6 +479,7 @@ async function charge() {
 
 // ---- Liens profonds : #du=2026-10-11&au=2026-10-11&lot=9223075022 (ou &can=922), utilisés par les événements de calendrier.
 function lienProfond() {
+  lotFiltre = null;
   const p = new URLSearchParams(location.hash.slice(1));
   const jour = /^\d{4}-\d{2}-\d{2}$/;
   const du = p.get('du');
@@ -480,6 +494,7 @@ function lienProfond() {
     carte.fitBounds(L.featureGroup(cible).getBounds(), { maxZoom: 15, padding: [20, 20] });
     if (p.has('lot')) cible[0].openPopup();
   }
+  viderRecherche();
   return true;
 }
 window.addEventListener('hashchange', () => donnees && lienProfond());

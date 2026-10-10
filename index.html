@@ -32,10 +32,10 @@
   </div>
 </header>
   <div id="recherche">
-    <input type="text" id="recherche-input" aria-label="Rechercher un territoire par numéro de lot ou par cantonnement" placeholder="🔍 Rechercher un lot (ex. 93247) ou un cantonnement…">
+    <input type="text" id="recherche-input" aria-label="Rechercher un territoire par numéro de lot ou par cantonnement" aria-autocomplete="list" placeholder="🔍 Rechercher un lot (ex. 93247) ou un cantonnement…">
     <button id="recherche-clear" type="button" title="Effacer" hidden>✕</button>
   </div>
-  <div id="recherche-liste" class="autocomplete" hidden></div>
+  <div id="recherche-liste" class="autocomplete" hidden role="listbox"></div>
 
 <details id="periode" hidden>
   <summary></summary>

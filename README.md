@@ -40,4 +40,4 @@ python3 -m http.server 8931
 
 ## Déploiement
 
-Le workflow `.github/workflows/donnees.yml` régénère les données deux fois par jour et publie le site sur GitHub Pages (Settings > Pages > Source : GitHub Actions).
+Le workflow `.github/workflows/donnees.yml` régénère les données trois fois par jour (03:15, 10:15, 16:15 UTC) et publie le site sur GitHub Pages (Settings > Pages > Source : GitHub Actions).

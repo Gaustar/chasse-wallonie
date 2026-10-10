@@ -148,7 +148,6 @@ header { padding: 8px 10px 6px; padding-top: max(8px, env(safe-area-inset-top));
 .autocomplete .item .pre { color: var(--discret); font-weight: 700; }
 
 #carte { flex: 1; min-height: 0; background: #dfe5dc; }
-#carte { flex: 1; min-height: 0; background: #dfe5dc; }
 #position {
   position: fixed;
   right: 12px;

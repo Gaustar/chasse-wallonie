@@ -26,6 +26,23 @@ const carte = L.map('carte', { zoomControl: false, renderer: L.canvas({ padding:
 carte.on('moveend', () => retient('vue', { c: [carte.getCenter().lat, carte.getCenter().lng], z: carte.getZoom() }));
 L.control.zoom({ position: 'bottomleft' }).addTo(carte);
 L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(carte);
+
+const ControleLegende = L.Control.extend({
+  onAdd: (carte) => {
+    const div = L.DomUtil.create('div', 'legende');
+    div.innerHTML =
+      '<h4>Légende</h4>' +
+      '<div class="ligne"><span class="badge B"></span> Battue</div>' +
+      '<div class="ligne"><span class="badge A"></span> Affût</div>' +
+      '<div class="ligne"><span class="badge X"></span> Autre</div>' +
+      '<div class="ligne"><span class="trait plein"></span> Chemin fermé ce jour</div>' +
+      '<div class="ligne"><span class="trait pointille"></span> Sans fermeture</div>' +
+      '<div class="source">SPW – DNF (Wallonie) · ONF (France)</div>';
+    return div;
+  },
+  onRemove() {}
+});
+carte.addControl(new ControleLegende({ position: 'bottomright' }));
 const CREDIT = 'Données chasse : SPW – DNF, ONF';
 // Photo aérienne SPW : pas de tuiles Web Mercator, on demande chaque tuile à l'export ArcGIS (512 px).
 const Ortho = L.TileLayer.extend({
@@ -93,7 +110,10 @@ function dessine() {
   if (couche) couche.remove();
   let chasses = 0;
   couche = L.geoJSON(donnees, {
-    filter: (f) => dansPeriode(f, modes).length > 0,
+    filter: (f) => {
+      if (lotFiltre && f.properties.lot != lotFiltre) return false;
+      return dansPeriode(f, modes).length > 0;
+    },
     style: (f) => {
       const actives = dansPeriode(f, modes);
       chasses += actives.length;
@@ -205,6 +225,101 @@ function listeSansTrace(modes) {
     .join('');
 }
 
+// --- Recherche par lot / cantonnement ---
+let lotFiltre = null;
+const listeRecherche = [];
+
+function preparerRecherche() {
+  if (!donnees || listeRecherche.length) return;
+  // nom du cantonnement → son code (612, 932, …)
+  const canCode = new Map();
+  for (const f of donnees.features) if (f.properties.cant && f.properties.can) canCode.set(f.properties.cant, f.properties.can);
+  const canTons = [...canCode.keys()];
+  for (const t of donnees.sansTrace ?? []) { if (t.cant && !canCode.has(t.cant)) canTons.push(t.cant); }
+  for (const f of donnees.features) {
+    const p = f.properties;
+    if (!listeRecherche.find(x => x.lot === p.lot))
+      listeRecherche.push({ lot: p.lot, can: p.can, cant: p.cant, fr: p.fr });
+  }
+  for (const t of donnees.sansTrace ?? []) {
+    const p = t;
+    if (!listeRecherche.find(x => x.lot === p.lot))
+      listeRecherche.push({ lot: p.lot, can: p.can, cant: p.cant, fr: false });
+  }
+  for (const cant of canTons)
+    listeRecherche.push({ cant: cant, lot: null, can: canCode.get(cant) });
+}
+
+function afficherResultats(term) {
+  preparerRecherche();
+  const t = term.toLowerCase();
+  const res = listeRecherche.filter(it => {
+    const matchLot = it.lot && it.lot.toLowerCase().includes(t);
+    const matchCan = it.cant && it.cant.toLowerCase().includes(t);
+    return matchLot || matchCan;
+  });
+  res.sort((a, b) => {
+    const am = a.lot ? 0 : 1, bm = b.lot ? 0 : 1;
+    if (am !== bm) return am - bm;
+    return a.cant.localeCompare(b.cant);
+  });
+  const liste = $('#recherche-liste');
+  liste.innerHTML = '';
+  if (!res.length) {
+    liste.innerHTML = '<div class="item" style="color:var(--discret)">Aucun résultat</div>';
+    liste.hidden = false;
+    return;
+  }
+  res.slice(0, 25).forEach((it, i) => {
+    const div = document.createElement('div');
+    div.className = 'item' + (i === 0 ? ' actif' : '');
+    if (it.lot) {
+      const pre = it.fr ? 'FR – ' : '';
+      div.innerHTML = `<span class="pre">${pre}</span><strong>Territoire ${it.lot}</strong>${it.cant ? ` · <em>${esc(it.cant)}</em>` : ''}`;
+      div.dataset.lot = it.lot;
+      div.dataset.can = it.can;
+    } else {
+      const nom = it.fr ? it.cant.replace(/^forêt domaniale /i, '').trim() : ICS.nomCantonnement(it.cant);
+      div.innerHTML = `<em class="canType">${it.fr ? 'Forêt' : 'Cantonnement'}</em> <strong>${esc(nom)}</strong>`;
+      div.dataset.can = it.can;
+    }
+    liste.appendChild(div);
+  });
+  liste.hidden = false;
+}
+
+function selectionnerLot(lot) {
+  lotFiltre = lot;
+  const f = donnees.features.find(x => x.properties.lot == lot);
+  if (f && f.properties.c) {
+    carte.setView(f.properties.c, 15);
+  }
+  $('#recherche-clear').hidden = false;
+  dessine();
+}
+
+function selectionnerCanton(can) {
+  lotFiltre = null;
+  const centres = [];
+  for (const f of donnees.features) if (f.properties.can == can) centres.push(f.properties.c);
+  if (centres.length) {
+    const c = [0, 0];
+    for (const [lng, lat] of centres) { c[0] += lng; c[1] += lat; }
+    c[0] /= centres.length; c[1] /= centres.length;
+    carte.setView(c, 13);
+  }
+  dessine();
+}
+
+function viderRecherche() {
+  lotFiltre = null;
+  $('#recherche-input').value = '';
+  $('#recherche-liste').innerHTML = '';
+  $('#recherche-liste').hidden = true;
+  $('#recherche-clear').hidden = true;
+  dessine();
+}
+
 function infobulle(f) {
   const p = f.properties;
   const lignes = p.d
@@ -302,6 +417,24 @@ carte.on('locationerror', (e) => {
   a.hidden = false;
   a.className = 'danger';
   a.textContent = `Position indisponible : ${e.message}`;
+});
+
+// --- Recherche : écouteurs ---
+const input = $('#recherche-input');
+input.addEventListener('input', (e) => afficherResultats(e.target.value));
+$('#recherche-clear').addEventListener('click', viderRecherche);
+$('#recherche-liste').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const item = e.target.closest('.item');
+  if (!item) return;
+  if (item.dataset.lot) selectionnerLot(item.dataset.lot);
+  else selectionnerCanton(item.dataset.can);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { viderRecherche(); input.blur(); }
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#recherche')) viderRecherche();
 });
 
 async function charge() {

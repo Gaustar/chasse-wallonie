@@ -178,6 +178,8 @@ if (onf) {
     if (d.length) sortie.features.push({ ...f, properties: { ...f.properties, d } });
   }
   if (onf.saison?.n) sortie.periodes.push({ fr: 1, mode: 'B', debut: onf.saison.debut, fin: onf.saison.fin, n: onf.saison.n });
+  // La fin de saison couvre aussi les jours ONF, souvent plus tardifs (fin février).
+  if (onf.saison?.fin > sortie.meta.fin) sortie.meta.fin = onf.saison.fin;
   await writeFile(new URL('../data/onf.json', import.meta.url), JSON.stringify(onf));
 }
 sortie.meta.onf = onf ? { genere: onf.genere, forets: onf.forets, chasses: onf.chasses, erreur: erreurONF } : { erreur: erreurONF ?? 'aucune donnée' };

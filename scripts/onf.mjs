@@ -111,7 +111,8 @@ export async function chassesONF(debut) {
         perimetre ??= (await lit(`${RECHERCHE}/++cc++${code}/get-location-forests.json`, 'json')).geometry ?? [];
         perimetre.forEach((geometry, i) => {
           geometry.coordinates = arrondit(geometry.coordinates);
-          ajoute(`${code}|foret${i}`, e.date, 'B', () => ({ geometry, lot: 'forêt entière', code, foret }));
+          // Le libellé porte le nom de la forêt : ICS et la recherche regroupent les territoires par lot.
+          ajoute(`${code}|foret${i}`, e.date, 'B', () => ({ geometry, lot: `forêt entière (${foret.nom})`, code, foret }));
         });
         if (!perimetre.length) throw new Error(`jour chassé sans aucun contour : ${foret.nom} le ${e.date}`);
       }

@@ -35,14 +35,14 @@ const ControleLegende = L.Control.extend({
       '<div class="ligne"><span class="badge B"></span> Battue</div>' +
       '<div class="ligne"><span class="badge A"></span> Affût</div>' +
       '<div class="ligne"><span class="badge X"></span> Autre</div>' +
-      '<div class="ligne"><span class="trait plein"></span> Chemin fermé ce jour</div>' +
-      '<div class="ligne"><span class="trait pointille"></span> Sans fermeture</div>' +
-      '<div class="source">SPW – DNF (Wallonie) · ONF (France)</div>';
+      '<div class="ligne"><span class="trait plein"></span> Chemin fermé (un jour de la période)</div>' +
+      '<div class="ligne"><span class="trait pointille"></span> Pas de fermeture (ONF : non publiée)</div>' +
+      '<div class="source">SPW – DNF (Wallonie) · ONF (France : fermetures non publiées)</div>';
     return div;
   },
   onRemove() {}
 });
-carte.addControl(new ControleLegende({ position: 'bottomright' }));
+carte.addControl(new ControleLegende({ position: 'topleft' })); // en haut à gauche : ne recouvre pas « ◎ » (bas à droite)
 const CREDIT = 'Données chasse : SPW – DNF, ONF';
 // Photo aérienne SPW : pas de tuiles Web Mercator, on demande chaque tuile à l'export ArcGIS (512 px).
 const Ortho = L.TileLayer.extend({
@@ -119,7 +119,7 @@ function dessine() {
       const actives = dansPeriode(f, modes);
       chasses += actives.length;
       const mode = GRAVITE.find((m) => actives.some((a) => a[1] === m));
-      const fermee = actives.some((a) => a[2]) || f.properties.fr; // l'ONF ne parle pas de fermeture : trait plein
+      const fermee = actives.some((a) => a[2]); // l'ONF ne publie pas les fermetures : trait pointillé, comme « pas de fermeture »
       return {
         color: COULEURS[mode],
         weight: fermee ? 2.5 : 1.5,
@@ -151,16 +151,19 @@ const datesDe = (fr) => [
   ...(fr ? [] : (donnees.sansTrace ?? []).map((t) => t.d)),
 ].flat();
 
+// Toutes les dates des territoires affichés (filtre de lot compris), tracés ou non.
+const datesAffichees = () => [
+  ...donnees.features.filter((f) => !lotFiltre || f.properties.lot === lotFiltre).map((f) => f.properties.d),
+  ...(donnees.sansTrace ?? []).filter((t) => !lotFiltre || t.lot === lotFiltre).map((t) => t.d),
+].flat();
+
 // Rien sur la période affichée : on annonce la prochaine chasse déclarée.
 function messageVide(modes) {
   const bloc = $('#vide');
-  const sources = lotFiltre
-    ? [donnees.features.find((f) => f.properties.lot === lotFiltre)]
-    : donnees.features;
-  const rien = !sources.some((f) => dansPeriode(f, modes).length);
+  const rien = !datesAffichees().some(([j, m]) => j >= periode.debut && j <= periode.fin && modes.includes(m));
   bloc.hidden = !rien;
   if (!rien) return;
-  const suite = prochaine(modes, periode.fin, sources.map((f) => f.properties.d).flat());
+  const suite = prochaine(modes, periode.fin, datesAffichees());
   const bouton = $('#vide button');
   bouton.hidden = !suite;
   if (suite) {
@@ -253,8 +256,9 @@ function preparerRecherche() {
 }
 
 function afficherResultats(term) {
+  const t = term.trim().toLowerCase();
+  if (!t) return fermeListe(); // champ vidé : rien à proposer
   preparerRecherche();
-  const t = term.toLowerCase();
   const res = listeRecherche.filter(it => {
     const matchLot = it.lot && it.lot.toLowerCase().includes(t);
     const matchCan = it.cant && it.cant.toLowerCase().includes(t);
@@ -280,7 +284,7 @@ function afficherResultats(term) {
     div.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
     if (it.lot) {
       const pre = it.fr ? 'FR – ' : '';
-      div.innerHTML = `<span class="pre">${pre}</span><strong>Territoire ${it.lot}</strong>${it.cant ? ` · <em>${esc(it.cant)}</em>` : ''}`;
+      div.innerHTML = `<span class="pre">${pre}</span><strong>${it.fr ? 'Lot ONF' : 'Territoire'} ${it.lot}</strong>${it.cant ? ` · <em>${esc(it.cant)}</em>` : ''}`;
       div.dataset.lot = it.lot;
       div.dataset.can = it.can;
     } else {
@@ -291,6 +295,7 @@ function afficherResultats(term) {
     liste.appendChild(div);
   });
   liste.hidden = false;
+  input.setAttribute('aria-expanded', 'true');
 }
 
 function selectionnerLot(lot) {
@@ -300,6 +305,7 @@ function selectionnerLot(lot) {
     carte.setView(f.properties.c, 15);
   }
   $('#recherche-clear').hidden = false;
+  fermeListe();
   dessine();
 }
 
@@ -313,17 +319,27 @@ function selectionnerCanton(can) {
     c[0] /= centres.length; c[1] /= centres.length;
     carte.setView(c, 13);
   }
+  fermeListe();
+  $('#recherche-clear').hidden = false;
   dessine();
 }
 
-function viderRecherche() {
-  lotFiltre = null;
-  $('#recherche-input').value = '';
+// Ferme la liste de suggestions, sans toucher au filtre de la carte.
+function fermeListe() {
   $('#recherche-liste').innerHTML = '';
   $('#recherche-liste').hidden = true;
-  $('#recherche-clear').hidden = true;
   input.setAttribute('aria-expanded', 'false');
-  dessine();
+}
+
+// Efface la saisie et le filtre de lot. La carte n'est redessinée que si le filtre change :
+// un redessin reconstruit les couches et ferme la fiche ouverte.
+function viderRecherche() {
+  const filtrait = lotFiltre !== null;
+  lotFiltre = null;
+  $('#recherche-input').value = '';
+  fermeListe();
+  $('#recherche-clear').hidden = true;
+  if (filtrait) dessine();
 }
 
 function infobulle(f) {
@@ -362,10 +378,8 @@ function verifiePosition() {
   if (!moi || !donnees) return (a.hidden = true);
   const pt = [moi.latlng.lng, moi.latlng.lat];
   const modes = modesActifs();
-  const features = lotFiltre
-    ? donnees.features.filter((f) => f.properties.lot === lotFiltre)
-    : donnees.features;
-  const touche = features.find((f) => dansPeriode(f, modes).length && contient(f.geometry, pt));
+  // La position ne dépend pas de la recherche : on teste tous les territoires tracés.
+  const touche = donnees.features.find((f) => dansPeriode(f, modes).length && contient(f.geometry, pt));
   a.hidden = false;
   if (touche) {
     const [j, m, ferme] = dansPeriode(touche, modes)[0];
@@ -439,15 +453,16 @@ $('#recherche-liste').addEventListener('click', (e) => {
   if (item.dataset.lot) selectionnerLot(item.dataset.lot);
   else selectionnerCanton(item.dataset.can);
 });
-document.addEventListener('keydown', (e) => {
+input.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { viderRecherche(); input.blur(); }
-  if (e.key === 'Enter' && input.value.trim()) {
-    const first = $('#recherche-liste .item:first-child');
-    if (first) { first.click(); e.preventDefault(); }
+  if (e.key === 'Enter') {
+    const premier = $('#recherche-liste [role=option]');
+    if (premier) { premier.click(); e.preventDefault(); }
   }
 });
+// Un clic ailleurs ferme seulement la liste : le filtre reste jusqu'à ✕ ou Échap.
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('#recherche')) viderRecherche();
+  if (!e.target.closest('#recherche')) fermeListe();
 });
 
 async function charge() {

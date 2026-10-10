@@ -139,7 +139,7 @@
       });
   }
 
-  const echappe = (t) => String(t).replace(/\\/g, '\\\\').replace(/;/g, '\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  const echappe = (t) => String(t).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
   const encodeur = new TextEncoder();
   // Lignes de 75 octets maximum, sans couper un caractère accentué.
   function plie(ligne) {

@@ -34,7 +34,7 @@ header { padding: 8px 10px 6px; padding-top: max(8px, env(safe-area-inset-top));
 #raz { border-style: dashed; color: var(--discret); }
 #raz[hidden] { display: none; }
 #ouvre-cal { min-height: 32px; padding: 0 10px; border: 1px solid #4a5a50; border-radius: 16px; background: transparent; color: var(--texte); font: inherit; white-space: nowrap; }
-#modes { display: flex; align-items: center; gap: 14px; margin-top: 6px; min-height: 32px; font-size: 14px; }
+#modes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 6px; min-height: 32px; font-size: 14px; }
 #modes label { display: flex; align-items: center; gap: 5px; }
 #modes input { position: absolute; opacity: 0; }
 #modes i { width: 16px; height: 16px; border-radius: 4px; border: 2px solid currentColor; }
@@ -92,7 +92,8 @@ header { padding: 8px 10px 6px; padding-top: max(8px, env(safe-area-inset-top));
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 6px;
+  margin: 6px 10px 0;
+  position: relative; /* ancre de la liste de suggestions */
 }
 #recherche-input {
   flex: 1;
@@ -129,7 +130,7 @@ header { padding: 8px 10px 6px; padding-top: max(8px, env(safe-area-inset-top));
   max-height: 280px;
   overflow-y: auto;
   font-size: 13px;
-  z-index: 1000;
+  z-index: 1100; /* au-dessus des contrôles Leaflet (1000) */
 }
 .autocomplete .item {
   padding: 8px 12px;

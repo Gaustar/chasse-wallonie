@@ -32,7 +32,7 @@
   </div>
 </header>
   <div id="recherche">
-    <input type="text" id="recherche-input" aria-label="Rechercher un territoire par numéro de lot ou par cantonnement" aria-autocomplete="list" placeholder="🔍 Rechercher un lot (ex. 93247) ou un cantonnement…">
+    <input type="text" id="recherche-input" aria-label="Rechercher un territoire par village, par numéro de lot ou par cantonnement" aria-autocomplete="list" placeholder="🔍 Village, lot ou cantonnement…">
     <button id="recherche-clear" type="button" title="Effacer" hidden>✕</button>
     <div id="recherche-liste" class="autocomplete" hidden role="listbox"></div>
   </div>
@@ -55,6 +55,7 @@
     <fieldset>
       <legend>Zone</legend>
       <label id="cal-lot" hidden><input type="radio" name="zone" value="lot"> <span></span></label>
+      <label id="cal-village" hidden><input type="radio" name="zone" value="village"> <span></span></label>
       <label><input type="radio" name="zone" value="vue" checked> Territoires visibles à l'écran</label>
       <label><input type="radio" name="zone" value="can"> Cantonnement ou forêt <select id="cal-can" aria-label="Cantonnement ou forêt domaniale"></select></label>
       <label><input type="radio" name="zone" value="tout"> Toute la Wallonie</label>

@@ -19,6 +19,12 @@ Limites : seules les chasses déclarées au DNF apparaissent ; le DNF synchronis
 
 Limites : forêts domaniales uniquement (rien sur les forêts privées ou communales) ; actions collectives de chasse au grand gibier, données indicatives selon l'ONF ; pas d'information de fermeture de chemins.
 
+### Villages
+
+`scripts/villages.mjs` construit `data/villages.json` (fichier versionné, à refaire rarement : `node scripts/villages.mjs`, environ 5 minutes). Chaque village (champ `ZONE_ADRES` des points d'adresses ICAR du SPW, service `DONNEES_BASE/ICAR_ADR_PT`) y est représenté par l'enveloppe convexe de ses adresses, ou par son rectangle englobant pour les 22 plus grandes localités.
+
+La recherche propose ces villages (accents ignorés). Le filtre garde les territoires tracés qui recouvrent ou touchent le contour, élargi d'environ 150 m. C'est une approximation : le contour n'est pas la limite officielle du village. Un territoire sans tracé ne peut pas être rattaché à un village ; ceux des mêmes cantonnements sont listés sous la carte, avec la mention « position inconnue ».
+
 Fonds de carte : topographique IGN/NGI (CartoWeb), orthophotos SPW (`IMAGERIE/ORTHO_LAST`), OpenTopoMap.
 
 La période affichée (début et fin par mode) vient des premières et dernières dates déclarées de la saison, pas des dates légales d'ouverture. Rien n'est lié à une année : le script suit la saison publiée par le DNF et le workflow se réactive lui-même pour ne pas être suspendu.

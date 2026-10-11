@@ -27,22 +27,6 @@ carte.on('moveend', () => retient('vue', { c: [carte.getCenter().lat, carte.getC
 L.control.zoom({ position: 'bottomleft' }).addTo(carte);
 L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(carte);
 
-const ControleLegende = L.Control.extend({
-  onAdd: (carte) => {
-    const div = L.DomUtil.create('div', 'legende');
-    div.innerHTML =
-      '<h4>Légende</h4>' +
-      '<div class="ligne"><span class="badge B"></span> Battue</div>' +
-      '<div class="ligne"><span class="badge A"></span> Affût</div>' +
-      '<div class="ligne"><span class="badge X"></span> Autre</div>' +
-      '<div class="ligne"><span class="trait plein"></span> Chemin fermé (un jour de la période)</div>' +
-      '<div class="ligne"><span class="trait pointille"></span> Pas de fermeture (ONF : non publiée)</div>' +
-      '<div class="source">SPW – DNF (Wallonie) · ONF (France : fermetures non publiées)</div>';
-    return div;
-  },
-  onRemove() {}
-});
-carte.addControl(new ControleLegende({ position: 'topleft' })); // en haut à gauche : ne recouvre pas « ◎ » (bas à droite)
 const CREDIT = 'Données chasse : SPW – DNF, ONF';
 // Photo aérienne SPW : pas de tuiles Web Mercator, on demande chaque tuile à l'export ArcGIS (512 px).
 const Ortho = L.TileLayer.extend({
@@ -85,7 +69,14 @@ let donnees = null;
 let couche = null;
 let periode = { debut: iso(new Date()), fin: iso(new Date()) };
 let moi = null; // { latlng, marqueur, cercle }
+let posErreur = null; // message persistant tant que la localisation échoue
 let lotFiltre = null;
+let villageFiltre = null; // village choisi : { n, c, h } (contour approché)
+let lotsVillage = null; // lots tracés qui touchent ce village
+let cantonsVillage = null; // cantonnements de ces lots
+let coucheVillage = null;
+let villages = null; // data/villages.json, chargé à la première recherche
+let chargementVillages = null;
 
 function bornes(p) {
   const auj = iso(new Date());
@@ -109,15 +100,13 @@ function dessine() {
   if (!donnees) return;
   const modes = modesActifs();
   if (couche) couche.remove();
-  let chasses = 0;
   couche = L.geoJSON(donnees, {
     filter: (f) => {
-      if (lotFiltre && f.properties.lot != lotFiltre) return false;
+      if (!lotAffiche(f.properties.lot)) return false;
       return dansPeriode(f, modes).length > 0;
     },
     style: (f) => {
       const actives = dansPeriode(f, modes);
-      chasses += actives.length;
       const mode = GRAVITE.find((m) => actives.some((a) => a[1] === m));
       const fermee = actives.some((a) => a[2]); // l'ONF ne publie pas les fermetures : trait pointillé, comme « pas de fermeture »
       return {
@@ -151,20 +140,45 @@ const datesDe = (fr) => [
   ...(fr ? [] : (donnees.sansTrace ?? []).map((t) => t.d)),
 ].flat();
 
-// Toutes les dates des territoires affichés (filtre de lot compris), tracés ou non.
+// Filtres de recherche : un lot, ou un village (lots tracés qui le touchent).
+const lotAffiche = (lot) => (!lotFiltre || lot == lotFiltre) && (!lotsVillage || lotsVillage.has(lot));
+// Sans tracé, un territoire ne peut pas être rattaché à un village : on garde ceux des cantonnements voisins, signalés comme tels.
+const sansTraceAffiche = (t) => (lotFiltre ? t.lot == lotFiltre : cantonsVillage ? cantonsVillage.has(t.can) : true);
+
+// Toutes les dates des territoires affichés (filtre de recherche compris), tracés ou non.
 const datesAffichees = () => [
-  ...donnees.features.filter((f) => !lotFiltre || f.properties.lot === lotFiltre).map((f) => f.properties.d),
-  ...(donnees.sansTrace ?? []).filter((t) => !lotFiltre || t.lot === lotFiltre).map((t) => t.d),
+  ...donnees.features.filter((f) => lotAffiche(f.properties.lot)).map((f) => f.properties.d),
+  ...(donnees.sansTrace ?? []).filter(sansTraceAffiche).map((t) => t.d),
 ].flat();
 
 // Rien sur la période affichée : on annonce la prochaine chasse déclarée.
 function messageVide(modes) {
   const bloc = $('#vide');
+  const bouton = $('#vide button');
+  if (!modes.length) {
+    bloc.hidden = false;
+    bouton.hidden = true;
+    $('#vide span').textContent = 'Cochez au moins un mode de chasse pour voir les territoires.';
+    return;
+  }
+  if (villageFiltre && !lotsVillage.size) {
+    bloc.hidden = false;
+    bouton.hidden = true;
+    $('#vide span').textContent = `Aucun territoire tracé n'est déclaré dans ou contre ${libelleVillage(villageFiltre)}.`;
+    return;
+  }
+  const sansTrace = lotFiltre && !donnees.features.some((f) => f.properties.lot == lotFiltre);
   const rien = !datesAffichees().some(([j, m]) => j >= periode.debut && j <= periode.fin && modes.includes(m));
+  if (sansTrace && !rien) {
+    bloc.hidden = false;
+    bouton.hidden = true;
+    $('#vide span').textContent = `Le territoire ${lotFiltre} n'a pas de tracé publié : ses chasses sont listées sous la carte.`;
+    $('#sanstrace').open = true;
+    return;
+  }
   bloc.hidden = !rien;
   if (!rien) return;
   const suite = prochaine(modes, periode.fin, datesAffichees());
-  const bouton = $('#vide button');
   bouton.hidden = !suite;
   if (suite) {
     $('#vide span').textContent = `Aucune chasse déclarée sur cette période. Prochaine : ${longue(suite)}.`;
@@ -184,6 +198,7 @@ function affichePeriode() {
   const enCours = toutesSaisons.filter((p) => p.fin >= auj);
   const derniere = Math.max(...toutesSaisons.filter((p) => !p.fr).map((p) => p.saison));
   const lignes = enCours.length ? enCours : toutesSaisons.filter((p) => p.saison === derniere);
+  if (!lignes.length) return;
   const debut = lignes.reduce((m, p) => (p.debut < m ? p.debut : m), lignes[0].debut);
   const fin = lignes.reduce((m, p) => (p.fin > m ? p.fin : m), lignes[0].fin);
   const suite = prochaine(['B', 'A', 'X'], decale(auj, -1));
@@ -216,12 +231,14 @@ function affichePeriode() {
 // Chasses déclarées dont le territoire n'a pas de tracé public : affichées en texte.
 function listeSansTrace(modes) {
   const lots = (donnees.sansTrace ?? [])
+    .filter(sansTraceAffiche)
     .map((t) => ({ ...t, actives: dansPeriode({ properties: t }, modes) }))
     .filter((t) => t.actives.length);
   const bloc = $('#sanstrace');
   bloc.hidden = lots.length === 0;
   const n = lots.reduce((s, t) => s + t.actives.length, 0);
-  $('#sanstrace summary').textContent = `⚠ ${n} chasse${n > 1 ? 's' : ''} déclarée${n > 1 ? 's' : ''} sans tracé sur la carte (${lots.length} territoire${lots.length > 1 ? 's' : ''})`;
+  const voisin = villageFiltre ? ' · même cantonnement que les territoires du village, position inconnue' : '';
+  $('#sanstrace summary').textContent = `⚠ ${n} chasse${n > 1 ? 's' : ''} déclarée${n > 1 ? 's' : ''} sans tracé sur la carte (${lots.length} territoire${lots.length > 1 ? 's' : ''})${voisin}`;
   $('#sanstrace ul').innerHTML = lots
     .map((t) => {
       const dates = t.actives
@@ -255,36 +272,61 @@ function preparerRecherche() {
     listeRecherche.push({ cant: cant, lot: null, can: canCode.get(cant) });
 }
 
+const norm = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+const libelleVillage = (v) => (v.c === v.n ? v.n : `${v.n} (${v.c})`);
+
+async function chargeVillages() {
+  try {
+    const r = await fetch('data/villages.json');
+    if (r.ok) villages = (await r.json()).villages;
+  } catch {}
+  chargementVillages = null;
+  if (villages && input.value.trim()) afficherResultats(input.value);
+}
+
 function afficherResultats(term) {
-  const t = term.trim().toLowerCase();
+  const t = norm(term.trim());
   if (!t) return fermeListe(); // champ vidé : rien à proposer
   preparerRecherche();
+  if (!villages && !chargementVillages) chargementVillages = chargeVillages();
   const res = listeRecherche.filter(it => {
-    const matchLot = it.lot && it.lot.toLowerCase().includes(t);
-    const matchCan = it.cant && it.cant.toLowerCase().includes(t);
+    const matchLot = it.lot && norm(it.lot).includes(t);
+    const matchCan = it.cant && norm(it.cant).includes(t);
     return matchLot || matchCan;
   });
+  const numerique = /^\d/.test(t); // un numéro cherche d'abord les lots, un nom cherche d'abord les cantonnements
   res.sort((a, b) => {
-    const am = a.lot ? 0 : 1, bm = b.lot ? 0 : 1;
+    const am = (a.lot ? 0 : 1) * (numerique ? 1 : -1), bm = (b.lot ? 0 : 1) * (numerique ? 1 : -1);
     if (am !== bm) return am - bm;
     return a.cant.localeCompare(b.cant);
   });
+  // Un nom cherche d'abord les villages qui commencent par ce nom, puis les cantonnements, les autres villages, les lots.
+  const trouves = numerique ? [] : (villages ?? []).map((v, i) => ({ village: i, nom: norm(v.n) })).filter((x) => x.nom.includes(t));
+  const cantons = res.filter((it) => !it.lot);
+  const lots = res.filter((it) => it.lot);
+  const ordre = numerique
+    ? [...lots, ...cantons]
+    : [...trouves.filter((x) => x.nom.startsWith(t)), ...cantons, ...trouves.filter((x) => !x.nom.startsWith(t)), ...lots];
   const liste = $('#recherche-liste');
   liste.innerHTML = '';
-  if (!res.length) {
+  if (!ordre.length) {
     liste.innerHTML = '<div class="item" style="color:var(--discret)">Aucun résultat</div>';
     liste.hidden = false;
     input.setAttribute('aria-expanded', 'false');
     return;
   }
-  res.slice(0, 25).forEach((it, i) => {
+  ordre.slice(0, 25).forEach((it, i) => {
     const div = document.createElement('div');
     div.className = 'item' + (i === 0 ? ' actif' : '');
     div.setAttribute('role', 'option');
     div.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
-    if (it.lot) {
+    if (it.village !== undefined) {
+      const v = villages[it.village];
+      div.innerHTML = `<em class="canType">Village</em> <strong>${esc(v.n)}</strong>${v.c !== v.n ? ` · <em>${esc(v.c)}</em>` : ''}`;
+      div.dataset.village = it.village;
+    } else if (it.lot) {
       const pre = it.fr ? 'FR – ' : '';
-      div.innerHTML = `<span class="pre">${pre}</span><strong>${it.fr ? 'Lot ONF' : 'Territoire'} ${it.lot}</strong>${it.cant ? ` · <em>${esc(it.cant)}</em>` : ''}`;
+      div.innerHTML = `<span class="pre">${pre}</span><strong>${it.fr ? 'Lot ONF' : 'Territoire'} ${esc(it.lot)}</strong>${it.cant ? ` · <em>${esc(it.cant)}</em>` : ''}`;
       div.dataset.lot = it.lot;
       div.dataset.can = it.can;
     } else {
@@ -298,29 +340,105 @@ function afficherResultats(term) {
   input.setAttribute('aria-expanded', 'true');
 }
 
-function selectionnerLot(lot) {
-  lotFiltre = lot;
-  const f = donnees.features.find(x => x.properties.lot == lot);
-  if (f && f.properties.c) {
-    carte.setView(f.properties.c, 15);
+// Cadre la carte sur des polygones, sans zoomer plus que nécessaire.
+function cadre(features) {
+  const bornes = L.geoJSON(features).getBounds();
+  if (bornes.isValid()) carte.fitBounds(bornes, { maxZoom: 16, padding: [30, 30] });
+}
+
+function oublieVillage() {
+  villageFiltre = lotsVillage = cantonsVillage = null;
+  if (coucheVillage) coucheVillage.remove();
+  coucheVillage = null;
+}
+
+// Contour du village : enveloppe de ses adresses, élargie d'environ 150 m (les chasses jouxtent souvent les dernières maisons).
+const MARGE_VILLAGE = 0.0015;
+function contourVillage({ h }) {
+  if (h.length < 3) {
+    const xs = h.map((p) => p[0]);
+    const ys = h.map((p) => p[1]);
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const m = MARGE_VILLAGE;
+    return [[x0 - m, y0 - m], [x1 + m, y0 - m], [x1 + m, y1 + m], [x0 - m, y1 + m]];
   }
+  const cx = h.reduce((s, p) => s + p[0], 0) / h.length;
+  const cy = h.reduce((s, p) => s + p[1], 0) / h.length;
+  return h.map(([x, y]) => {
+    const d = Math.hypot(x - cx, y - cy) || 1;
+    return [x + ((x - cx) / d) * MARGE_VILLAGE, y + ((y - cy) / d) * MARGE_VILLAGE];
+  });
+}
+
+const orientation = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+const secants = (a, b, c, d) => orientation(a, b, c) !== orientation(a, b, d) && orientation(c, d, a) !== orientation(c, d, b);
+
+// Territoires tracés qui recouvrent ou touchent le contour : un sommet dans l'autre figure, ou deux côtés qui se croisent.
+function territoiresDuVillage(contour) {
+  const xs = contour.map((p) => p[0]);
+  const ys = contour.map((p) => p[1]);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const lots = new Set();
+  const cantons = new Set();
+  for (const f of donnees.features) {
+    const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+    const touche = polys.some((p) => {
+      const ext = p[0];
+      let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+      for (const [x, y] of ext) {
+        if (x < a0) a0 = x;
+        if (x > a1) a1 = x;
+        if (y < b0) b0 = y;
+        if (y > b1) b1 = y;
+      }
+      if (a1 < x0 || a0 > x1 || b1 < y0 || b0 > y1) return false;
+      if (contour.some((pt) => dansAnneau(pt, ext) && !p.slice(1).some((trou) => dansAnneau(pt, trou)))) return true;
+      if (ext.some((pt) => dansAnneau(pt, contour))) return true;
+      for (let i = 1; i < ext.length; i++)
+        for (let j = 0; j < contour.length; j++) if (secants(ext[i - 1], ext[i], contour[j], contour[(j + 1) % contour.length])) return true;
+      return false;
+    });
+    if (touche) {
+      lots.add(f.properties.lot);
+      if (f.properties.can) cantons.add(f.properties.can);
+    }
+  }
+  return { lots, cantons };
+}
+
+function selectionnerVillage(i) {
+  const v = villages[i];
+  const contour = contourVillage(v);
+  const { lots, cantons } = territoiresDuVillage(contour);
+  lotFiltre = null;
+  oublieVillage();
+  villageFiltre = v;
+  lotsVillage = lots;
+  cantonsVillage = cantons;
+  const pts = contour.map(([x, y]) => [y, x]);
+  coucheVillage = L.polygon(pts, { color: '#111', weight: 2, dashArray: '2 6', fill: false, interactive: false }).addTo(carte);
+  carte.fitBounds(L.latLngBounds(pts), { maxZoom: 15, padding: [30, 30] });
+  $('#recherche-input').value = libelleVillage(v);
+  $('#recherche-clear').hidden = false;
+  fermeListe();
+  dessine();
+}
+
+function selectionnerLot(lot) {
+  oublieVillage();
+  lotFiltre = lot;
+  cadre(donnees.features.filter((f) => f.properties.lot == lot));
   $('#recherche-clear').hidden = false;
   fermeListe();
   dessine();
 }
 
 function selectionnerCanton(can) {
+  oublieVillage();
   lotFiltre = null;
-  const centres = [];
-  for (const f of donnees.features) if (f.properties.can == can) centres.push(f.properties.c);
-  if (centres.length) {
-    const c = [0, 0];
-    for (const [lng, lat] of centres) { c[0] += lng; c[1] += lat; }
-    c[0] /= centres.length; c[1] /= centres.length;
-    carte.setView(c, 13);
-  }
+  cadre(donnees.features.filter((f) => f.properties.can == can));
   fermeListe();
-  $('#recherche-clear').hidden = false;
+  $('#recherche-clear').hidden = true;
   dessine();
 }
 
@@ -334,8 +452,9 @@ function fermeListe() {
 // Efface la saisie et le filtre de lot. La carte n'est redessinée que si le filtre change :
 // un redessin reconstruit les couches et ferme la fiche ouverte.
 function viderRecherche() {
-  const filtrait = lotFiltre !== null;
+  const filtrait = lotFiltre !== null || villageFiltre !== null;
   lotFiltre = null;
+  oublieVillage();
   $('#recherche-input').value = '';
   fermeListe();
   $('#recherche-clear').hidden = true;
@@ -375,6 +494,12 @@ function contient(geom, pt) {
 
 function verifiePosition() {
   const a = $('#alerte');
+  if (posErreur) {
+    a.hidden = false;
+    a.className = 'danger';
+    a.textContent = posErreur;
+    return;
+  }
   if (!moi || !donnees) return (a.hidden = true);
   const pt = [moi.latlng.lng, moi.latlng.lat];
   const modes = modesActifs();
@@ -388,7 +513,7 @@ function verifiePosition() {
     a.textContent = `Vous êtes dans ${ou} : chasse ${touche.properties.fr ? 'inscrite au calendrier' : 'déclarée'} ${lisible(j)} (${LIBELLES[m].toLowerCase()}${ferme ? ', chemins fermés' : ''})`;
   } else {
     a.className = 'ok';
-    a.textContent = 'Aucune chasse déclarée à votre position sur la période affichée';
+    a.textContent = 'Aucune chasse déclarée sur les territoires tracés à votre position, sur la période affichée';
   }
 }
 
@@ -417,11 +542,20 @@ $('#raz').addEventListener('click', () => choisit('jour'));
 $('#modes').addEventListener('change', dessine);
 
 $('#position').addEventListener('click', () => {
-  $('#position').classList.add('suivi');
+  const bouton = $('#position');
+  if (bouton.classList.contains('suivi')) {
+    carte.stopLocate();
+    bouton.classList.remove('suivi');
+    bouton.title = 'Ma position';
+    return;
+  }
+  bouton.classList.add('suivi');
+  bouton.title = 'Arrêter le suivi';
   carte.locate({ watch: true, enableHighAccuracy: true });
   if (moi) carte.setView(moi.latlng, Math.max(carte.getZoom(), 14));
 });
 carte.on('locationfound', (e) => {
+  posErreur = null;
   if (!moi) {
     moi = {
       marqueur: L.circleMarker(e.latlng, { radius: 7, color: '#fff', weight: 2, fillColor: '#2b6cb0', fillOpacity: 1 }).addTo(carte),
@@ -436,10 +570,10 @@ carte.on('locationfound', (e) => {
 });
 carte.on('locationerror', (e) => {
   $('#position').classList.remove('suivi');
-  const a = $('#alerte');
-  a.hidden = false;
-  a.className = 'danger';
-  a.textContent = `Position indisponible : ${e.message}`;
+  posErreur = e.code === 1
+    ? 'Position indisponible : autorisez la localisation pour ce site dans le navigateur.'
+    : 'Position indisponible pour le moment. Réessayez en extérieur.';
+  verifiePosition();
 });
 
 // --- Recherche : écouteurs ---
@@ -451,13 +585,25 @@ $('#recherche-liste').addEventListener('click', (e) => {
   const item = e.target.closest('.item');
   if (!item) return;
   if (item.dataset.lot) selectionnerLot(item.dataset.lot);
-  else selectionnerCanton(item.dataset.can);
+  else if (item.dataset.village !== undefined) selectionnerVillage(Number(item.dataset.village));
+  else if (item.dataset.can) selectionnerCanton(item.dataset.can);
 });
 input.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { viderRecherche(); input.blur(); }
-  if (e.key === 'Enter') {
-    const premier = $('#recherche-liste [role=option]');
-    if (premier) { premier.click(); e.preventDefault(); }
+  if (e.key === 'Escape') { viderRecherche(); input.blur(); return; }
+  const items = [...document.querySelectorAll('#recherche-liste [role=option]')];
+  if (!items.length) return;
+  const actuel = items.findIndex((el) => el.classList.contains('actif'));
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const suivant = (actuel + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items.forEach((el, k) => {
+      el.classList.toggle('actif', k === suivant);
+      el.setAttribute('aria-selected', String(k === suivant));
+    });
+    items[suivant].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    items[Math.max(actuel, 0)].click();
   }
 });
 // Un clic ailleurs ferme seulement la liste : le filtre reste jusqu'à ✕ ou Échap.
@@ -494,12 +640,13 @@ async function charge() {
 
 // ---- Liens profonds : #du=2026-10-11&au=2026-10-11&lot=9223075022 (ou &can=922), utilisés par les événements de calendrier.
 function lienProfond() {
-  lotFiltre = null;
   const p = new URLSearchParams(location.hash.slice(1));
   const jour = /^\d{4}-\d{2}-\d{2}$/;
   const du = p.get('du');
   const au = p.get('au') ?? du;
   if (!jour.test(du ?? '') || !jour.test(au ?? '') || au < du) return false;
+  lotFiltre = null;
+  oublieVillage();
   choisit({ debut: du, fin: au });
   const cible = couche.getLayers().filter((l) => {
     const pr = l.feature.properties;
@@ -558,6 +705,11 @@ function selection() {
     nom = liste[0] ? ICS.libelle(liste[0]) : `territoire ${lotChoisi}`;
     Object.assign(opt, { portee: nom, cle: `lot${ICS.fichierLot(lotChoisi)}` });
     abo = `cal/t/${ICS.fichierLot(lotChoisi)}.ics`;
+  } else if (zone === 'village') {
+    liste = liste.filter((t) => lotsVillage.has(t.lot));
+    nom = `village ${libelleVillage(villageFiltre)}`;
+    Object.assign(opt, { portee: nom, cle: `village${ICS.fichierLot(norm(libelleVillage(villageFiltre)))}` });
+    pourquoi = "Pas d'abonnement pour un village : le contour est une approximation. Seuls les territoires tracés qui le touchent sont inclus.";
   } else if (zone === 'can') {
     const can = $('#cal-can').value;
     const z = zonesCal.get(can);
@@ -610,11 +762,15 @@ function ouvreCalendrier(lot) {
   lotChoisi = lot ?? null;
   $('#cal-lot').hidden = !lotChoisi;
   $('#cal-lot span').textContent = lotChoisi ? (/^\d+$/.test(lotChoisi) ? `Territoire ${lotChoisi}` : `Lot ONF ${lotChoisi}`) : '';
+  $('#cal-village').hidden = !villageFiltre;
+  $('#cal-village span').textContent = villageFiltre ? `Territoires touchant ${libelleVillage(villageFiltre)}` : '';
   if (lotChoisi) {
     document.querySelector('#cal input[value=lot]').checked = true;
     document.querySelector('#cal input[value=territoire]').checked = true;
     document.querySelector('#cal input[value=saison]').checked = true;
-  } else if (champ('zone') === 'lot') {
+  } else if (villageFiltre) {
+    document.querySelector('#cal input[value=village]').checked = true;
+  } else if (['lot', 'village'].includes(champ('zone'))) {
     document.querySelector('#cal input[value=vue]').checked = true;
   }
   majCalendrier();

@@ -63,7 +63,7 @@ const fonds = {
 const fondChoisi = memoire('fond', 'Carte IGN');
 fonds[fondChoisi in fonds ? fondChoisi : 'Carte IGN'].addTo(carte);
 L.control.layers(fonds, null, { position: 'topright' }).addTo(carte);
-carte.on('baselayerchange', (e) => { retient('fond', e.name); suivi('fond'); });
+carte.on('baselayerchange', (e) => { retient('fond', e.name); suivi('fond', { detail: e.name }); });
 
 let donnees = null;
 let couche = null;
@@ -116,7 +116,7 @@ function dessine() {
         fillOpacity: fermee ? 0.4 : 0.18,
       };
     },
-    onEachFeature: (f, l) => { l.bindPopup(() => infobulle(f), { maxWidth: 300 }); l.on('popupopen', () => suivi('territoire')); },
+    onEachFeature: (f, l) => { l.bindPopup(() => infobulle(f), { maxWidth: 300 }); l.on('popupopen', () => suivi('territoire', { detail: `${f.properties.fr ? 'Lot ONF' : 'Territoire'} ${f.properties.lot}${f.properties.cant ? ' · ' + f.properties.cant : ''}` })); },
   }).addTo(carte);
   const n = new Set(couche.getLayers().map((l) => l.feature.properties.lot)).size;
   $('#compte').textContent = `${n} territoire${n > 1 ? 's' : ''}`;
@@ -407,8 +407,8 @@ function territoiresDuVillage(contour) {
 }
 
 function selectionnerVillage(i) {
-  suivi('village');
   const v = villages[i];
+  suivi('village', { detail: libelleVillage(v) });
   const contour = contourVillage(v);
   const { lots, cantons } = territoiresDuVillage(contour);
   lotFiltre = null;
@@ -426,6 +426,7 @@ function selectionnerVillage(i) {
 }
 
 function selectionnerLot(lot) {
+  suivi('recherche', { detail: `lot ${lot}` });
   oublieVillage();
   lotFiltre = lot;
   cadre(donnees.features.filter((f) => f.properties.lot == lot));
@@ -435,6 +436,7 @@ function selectionnerLot(lot) {
 }
 
 function selectionnerCanton(can) {
+  suivi('recherche', { detail: `cantonnement ${donnees.features.find((f) => f.properties.can == can)?.properties.cant ?? can}` });
   oublieVillage();
   lotFiltre = null;
   cadre(donnees.features.filter((f) => f.properties.can == can));
@@ -493,6 +495,16 @@ function contient(geom, pt) {
   return polys.some((p) => dansAnneau(pt, p[0]) && !p.slice(1).some((trou) => dansAnneau(pt, trou)));
 }
 
+// GPS : seul l'état est suivi (jamais le territoire), à son changement et au plus une fois par 2 min pour un même état
+// (bord de territoire, signal intermittent sous couvert forestier).
+let dernierEtatGps = null;
+const gpsNote = {};
+function suiviGps(etat) {
+  if (etat === dernierEtatGps || Date.now() - (gpsNote[etat] ?? 0) < 120000) return;
+  dernierEtatGps = etat;
+  gpsNote[etat] = Date.now();
+  suivi('gps', { detail: etat });
+}
 function verifiePosition() {
   const a = $('#alerte');
   if (posErreur) {
@@ -507,6 +519,8 @@ function verifiePosition() {
   // La position ne dépend pas de la recherche : on teste tous les territoires tracés.
   const touche = donnees.features.find((f) => dansPeriode(f, modes).length && contient(f.geometry, pt));
   a.hidden = false;
+  const etat = touche ? 'dans un territoire chassé' : 'hors territoire chassé';
+  suiviGps('alerte : ' + etat);
   if (touche) {
     const [j, m, ferme] = dansPeriode(touche, modes)[0];
     a.className = 'danger';
@@ -529,31 +543,36 @@ function choisit(p) {
   dessine();
 }
 
-document.querySelectorAll('#periodes button').forEach((b) => b.addEventListener('click', () => { suivi('periode'); choisit(b.dataset.p); }));
+document.querySelectorAll('#periodes button').forEach((b) => b.addEventListener('click', () => { suivi('periode', { detail: b.textContent.trim() }); choisit(b.dataset.p); }));
 // Plage libre : si une borne dépasse l'autre, on ramène l'autre sur la même date.
 $('#du').addEventListener('change', (e) => {
-  suivi('periode');
   const debut = e.target.value;
   if (debut) choisit({ debut, fin: periode.fin < debut ? debut : periode.fin });
+  suivi('periode', { detail: `du ${periode.debut} au ${periode.fin}` });
 });
 $('#au').addEventListener('change', (e) => {
-  suivi('periode');
   const fin = e.target.value;
   if (fin) choisit({ debut: periode.debut > fin ? fin : periode.debut, fin });
+  suivi('periode', { detail: `du ${periode.debut} au ${periode.fin}` });
 });
 $('#raz').addEventListener('click', () => choisit('jour'));
-$('#modes').addEventListener('change', () => { suivi('mode'); dessine(); });
+$('#modes').addEventListener('change', () => {
+  suivi('mode', { detail: [...document.querySelectorAll('#modes input:checked')].map((c) => LIBELLES[c.value]).join(', ') || 'aucun' });
+  dessine();
+});
 
 $('#position').addEventListener('click', () => {
   const bouton = $('#position');
   if (bouton.classList.contains('suivi')) {
     carte.stopLocate();
+    suivi('gps', { detail: 'arrêté' });
     bouton.classList.remove('suivi');
     bouton.title = 'Ma position';
     return;
   }
   bouton.classList.add('suivi');
-  suivi('gps');
+  suivi('gps', { detail: 'activé' });
+  dernierEtatGps = null;
   bouton.title = 'Arrêter le suivi';
   carte.locate({ watch: true, enableHighAccuracy: true });
   if (moi) carte.setView(moi.latlng, Math.max(carte.getZoom(), 14));
@@ -574,6 +593,7 @@ carte.on('locationfound', (e) => {
 });
 carte.on('locationerror', (e) => {
   $('#position').classList.remove('suivi');
+  suiviGps(e.code === 1 ? 'refusé' : 'indisponible');
   posErreur = e.code === 1
     ? 'Position indisponible : autorisez la localisation pour ce site dans le navigateur.'
     : 'Position indisponible pour le moment. Réessayez en extérieur.';
@@ -784,7 +804,7 @@ function ouvreCalendrier(lot) {
   $('#cal').showModal();
 }
 
-$('#ouvre-cal').addEventListener('click', () => donnees && ouvreCalendrier());
+$('#ouvre-cal').addEventListener('click', () => { suivi('calendrier'); donnees && ouvreCalendrier(); });
 document.addEventListener('click', (e) => {
   const lien = e.target.closest('.vers-cal');
   if (!lien) return;
@@ -799,8 +819,8 @@ $('#cal').addEventListener('change', (e) => {
   majCalendrier();
 });
 $('#cal-dl').addEventListener('click', async () => {
-  suivi('ics');
   const s = selection();
+  suivi('ics', { detail: `${s.nom} · ${s.du} → ${s.au} · rappel ${$('#cal-rappel').selectedOptions[0]?.textContent ?? '?'}` });
   const titre = `Chasses · ${s.nom}`;
   const contenu = ICS.fichier(titre, 'Chasses déclarées au DNF (Wallonie) et jours chassés publiés par l’ONF (France). Les panneaux sur le terrain priment toujours.', s.evts, { rappel: $('#cal-rappel').value });
   const nomFichier = `chasses-${s.nom.replace(/[^a-z0-9à-ÿ]+/gi, '-').toLowerCase()}-${s.du}_${s.au}.ics`;
@@ -818,8 +838,10 @@ $('#cal-dl').addEventListener('click', async () => {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 });
+$('#cal-webcal').addEventListener('click', () => suivi('abonnement', { detail: `Apple/Outlook · ${selection().nom}` }));
+$('#cal-google').addEventListener('click', () => suivi('abonnement', { detail: `Google Agenda · ${selection().nom}` }));
 $('#cal-copie').addEventListener('click', async (e) => {
-  suivi('abonnement');
+  suivi('abonnement', { detail: `adresse copiée · ${selection().nom}` });
   try {
     await navigator.clipboard.writeText(e.target.dataset.adresse);
     e.target.textContent = 'Adresse copiée';

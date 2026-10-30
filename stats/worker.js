@@ -33,8 +33,8 @@ export default {
       let e;
       try { e = valide(JSON.parse(texte), req.headers.get('User-Agent') ?? ''); } catch { e = null; }
       if (!e) return new Response(null, { status: 400, headers: CORS });
-      await env.DB.prepare('INSERT INTO evt (t, appareil, uid, sid, type, nom, ms, ecran, inst, donnees, ua) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-        .bind(Date.now(), e.appareil, e.uid, e.sid, e.type, e.nom, e.ms, e.ecran, e.inst, e.donnees, e.ua).run();
+      await env.DB.prepare('INSERT INTO evt (t, appareil, uid, sid, type, nom, detail, ms, ecran, inst, donnees, ua) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+        .bind(Date.now(), e.appareil, e.uid, e.sid, e.type, e.nom, e.detail, e.ms, e.ecran, e.inst, e.donnees, e.ua).run();
       return new Response(null, { status: 204, headers: CORS });
     }
 
@@ -44,7 +44,7 @@ export default {
 
     if (route === 'GET /donnees') {
       const [evts, noms, comptes] = await env.DB.batch([
-        env.DB.prepare(`SELECT rowid AS id, t, uid, sid, type, nom, ms, ecran, inst, donnees, ua FROM evt ORDER BY t DESC LIMIT ${LIMITE}`),
+        env.DB.prepare(`SELECT rowid AS id, t, uid, sid, type, nom, detail, ms, ecran, inst, donnees, ua FROM evt ORDER BY t DESC LIMIT ${LIMITE}`),
         env.DB.prepare('SELECT uid, nom FROM nom_appareil'),
         env.DB.prepare('SELECT uid, count(*) AS n FROM evt GROUP BY uid'),
       ]);

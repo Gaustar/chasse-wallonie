@@ -20,6 +20,7 @@ export function valide(e, ua) {
     sid: court(e.sid, 8),
     type: e.type,
     nom: court(e.nom, 120),
+    detail: court(e.detail, 120),
     ms: Number.isFinite(e.ms) ? Math.min(Math.max(0, Math.round(e.ms)), 4 * 3600 * 1000) : null,
     ecran: court(e.ecran, 12),
     inst: e.inst === 1 ? 1 : e.inst === 0 ? 0 : null,

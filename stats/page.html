@@ -49,10 +49,10 @@ h2 { margin: 0 0 12px; font-size: 15px; font-weight: 650; }
 .carte { grid-column: span 12; background: var(--surface); border: 1px solid var(--bord); border-radius: 14px; box-shadow: var(--ombre); padding: 16px; min-width: 0; }
 .tuile { grid-column: span 3; }
 .chaleur { grid-column: span 7; }
-.actions { grid-column: span 5; }
+.lieux { grid-column: span 5; }
 @media (max-width: 760px) {
   .tuile { grid-column: span 6; }
-  .chaleur, .actions { grid-column: span 12; }
+  .chaleur, .lieux { grid-column: span 12; }
   .tuile .valeur { font-size: 22px; white-space: nowrap; }
   .histo .barres { gap: 1px; }
 }
@@ -87,6 +87,20 @@ h2 { margin: 0 0 12px; font-size: 15px; font-weight: 650; }
 .barre-h .piste { height: 10px; }
 .barre-h .remplie { height: 100%; border-radius: 0 4px 4px 0; background: var(--d0); min-width: 2px; }
 .barre-h b { text-align: right; font-variant-numeric: tabular-nums; }
+.barre-h .det { grid-column: 2 / 4; margin-top: -4px; font-size: 12px; color: var(--texte2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lieu { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--bord); font-size: 13px; }
+.lieu:first-child { border-top: 0; }
+.lieu .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lieu .pts { display: flex; gap: 3px; }
+.lieu b { font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; }
+.visite { border-top: 1px solid var(--bord); padding: 10px 0; }
+.visite .tete { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13px; margin-bottom: 6px; }
+.visite .tete .sous { margin-left: auto; }
+.etapes { display: flex; flex-wrap: wrap; gap: 4px; font-size: 12px; }
+.etape { display: inline-flex; gap: 4px; padding: 2px 8px; border-radius: 999px; background: var(--vide); max-width: 100%; }
+.etape span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.etape i { font-style: normal; color: var(--texte2); font-variant-numeric: tabular-nums; }
+.etape.err { color: var(--danger); }
 
 .appareils { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 .appareils .carte { grid-column: auto; }
@@ -165,7 +179,14 @@ dialog .boutons { display: flex; justify-content: flex-end; gap: 8px; margin-top
 
     <section class="carte"><h2>Sessions par jour <span class="sous" id="histo-sous"></span></h2><div id="histo"></div></section>
     <section class="carte chaleur"><h2>Quand l'appli sert <span class="sous">sessions par heure et jour</span></h2><div id="hm"></div></section>
-    <section class="carte actions"><h2>Actions <span class="sous" id="act-sous"></span></h2><div id="actions"></div></section>
+    <section class="carte lieux"><h2>Lieux consultés <span class="sous">territoires, villages, recherches</span></h2><div id="lieux"></div></section>
+    <section class="carte"><h2>Actions <span class="sous" id="act-sous"></span></h2><div id="actions"></div></section>
+    <section class="carte">
+      <h2>Parcours des visites <span class="sous" id="p-sous"></span></h2>
+      <div class="filtres"><select id="p-app" aria-label="Parcours : appareil"></select></div>
+      <div id="parcours"></div>
+      <button type="button" class="bouton" id="p-plus" hidden>Afficher plus</button>
+    </section>
 
     <section class="carte"><h2>Appareils <span class="sous">cliquez sur un nom pour le changer</span></h2><div class="appareils" id="appareils"></div></section>
 
@@ -217,7 +238,8 @@ const heureDe = (t) => Number(fHeure.format(t));
 const decale = (jour, n) => { const d = new Date(jour + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const jsemDe = (jour) => (new Date(jour + 'T12:00:00Z').getUTCDay() + 6) % 7; // 0 = lundi
 const JOURS = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
-const ACTIONS = { periode: 'Période', territoire: 'Territoire ouvert', ics: 'Export .ics', abonnement: 'Abonnement agenda', gps: 'GPS', fond: 'Fond de carte', mode: 'Filtre battue/affût', village: 'Recherche village' };
+const ACTIONS = { periode: 'Période', territoire: 'Territoire ouvert', ics: 'Export .ics', abonnement: 'Abonnement agenda', gps: 'GPS', fond: 'Fond de carte', mode: 'Filtre battue/affût', village: 'Recherche village', recherche: 'Recherche lot/cantonnement', calendrier: 'Ouvre le calendrier' };
+const LIEUX = ['territoire', 'village', 'recherche'];
 const TYPES = { ouvre: 'Ouverture', action: 'Action', fin: 'Fin de visite', erreur: 'Erreur' };
 const CAT = 5; // au-delà, gris : jamais de couleur générée
 
@@ -328,6 +350,8 @@ function rend() {
   histogramme();
   chaleur();
   actions();
+  lieux();
+  parcours();
   cartesAppareils();
   filtresJournal();
   journal();
@@ -449,8 +473,61 @@ function actions() {
   const max = l[0]?.[1] ?? 1;
   $('#act-sous').textContent = l.length ? l.reduce((s, [, v]) => s + v, 0) + ' au total' : '';
   $('#actions').replaceChildren(...(l.length
-    ? l.map(([nom, v]) => el('div', { class: 'barre-h' }, el('span', {}, ACTIONS[nom] ?? nom), el('div', { class: 'piste' }, el('div', { class: 'remplie', style: { width: (v / max) * 100 + '%' } })), el('b', {}, v)))
+    ? l.map(([nom, v]) => {
+      const det = new Map();
+      for (const e of vue.evts) if (e.type === 'action' && e.nom === nom && e.detail && !LIEUX.includes(nom)) det.set(e.detail, (det.get(e.detail) ?? 0) + 1);
+      const top = [...det].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([d, n]) => d + ' ×' + n).join(' · ');
+      return el('div', { class: 'barre-h' }, el('span', {}, ACTIONS[nom] ?? nom), el('div', { class: 'piste' }, el('div', { class: 'remplie', style: { width: (v / max) * 100 + '%' } })), el('b', {}, v),
+        top ? el('div', { class: 'det', title: top }, top) : null);
+    })
     : [el('p', { class: 'vide' }, 'Aucune action sur la période.')]));
+}
+
+function lieux() {
+  const m = new Map();
+  for (const e of vue.evts) {
+    if (e.type !== 'action' || !LIEUX.includes(e.nom) || !e.detail) continue;
+    const x = m.get(e.detail) ?? { n: 0, uids: new Set(), nom: e.nom };
+    x.n++;
+    x.uids.add(e.uid);
+    m.set(e.detail, x);
+  }
+  const l = [...m].sort((a, b) => b[1].n - a[1].n).slice(0, 12);
+  $('#lieux').replaceChildren(...(l.length ? l.map(([d, x]) => el('div', { class: 'lieu' },
+    el('span', { class: 'pts' }, [...x.uids].map((u) => vue.appareils.get(u)).sort((a, b) => a.rang - b.rang).map(point)),
+    el('span', { class: 'n', title: (ACTIONS[x.nom] ?? x.nom) + ' : ' + d }, (x.nom === 'village' ? 'Village ' : x.nom === 'recherche' ? 'Recherche ' : '') + d),
+    el('b', {}, x.n))) : [el('p', { class: 'vide' }, 'Aucun lieu consulté sur la période.')]));
+}
+
+// Une visite = une session ; ses étapes dans l'ordre, avec le temps écoulé depuis l'ouverture.
+let parcoursVisibles = 10;
+function etiquette(e) {
+  if (e.type === 'ouvre') return 'Ouverture' + (e.inst ? ' (appli installée)' : '');
+  if (e.type === 'fin') return 'Quitte (' + duree(e.ms) + ')';
+  if (e.type === 'erreur') return 'Erreur : ' + e.nom;
+  return (ACTIONS[e.nom] ?? e.nom) + (e.detail ? ' : ' + e.detail : '');
+}
+const ecoule = (ms) => { const s = Math.round(ms / 1000); return '+' + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+function parcours() {
+  const f = $('#p-app'), choix = f.value;
+  f.replaceChildren(el('option', { value: '' }, 'Tous les appareils'), ...[...vue.appareils.values()].sort((a, b) => a.rang - b.rang).map((a) => el('option', { value: a.uid }, nomDe(a))));
+  f.value = vue.appareils.has(choix) ? choix : '';
+  const parSid = new Map();
+  for (const e of vue.evts) if (!f.value || e.uid === f.value) (parSid.get(e.sid) ?? parSid.set(e.sid, []).get(e.sid)).push(e);
+  const visites = [...parSid.values()].sort((a, b) => b[0].t - a[0].t);
+  $('#p-sous').textContent = visites.length + ' visite' + (visites.length > 1 ? 's' : '');
+  $('#parcours').replaceChildren(...(visites.length ? visites.slice(0, parcoursVisibles).map((ev) => {
+    const a = vue.appareils.get(ev[0].uid);
+    const actif = ev.reduce((n, e) => n + (e.type === 'fin' ? e.ms ?? 0 : 0), 0);
+    const nbActions = ev.filter((e) => e.type === 'action').length;
+    return el('div', { class: 'visite' },
+      el('div', { class: 'tete' }, point(a), el('b', {}, nomDe(a)), el('span', {}, fDate.format(ev[0].t)),
+        el('span', { class: 'sous' }, nbActions + ' action' + (nbActions > 1 ? 's' : '') + ' · ' + (actif ? duree(actif) + ' active' : 'durée inconnue'))),
+      el('div', { class: 'etapes' }, ev.map((e) => el('span', { class: 'etape' + (e.type === 'erreur' ? ' err' : ''), title: fDate.format(e.t) + ' · ' + etiquette(e) },
+        el('i', {}, ecoule(e.t - ev[0].t)), el('span', {}, etiquette(e))))));
+  }) : [el('p', { class: 'vide' }, 'Aucune visite sur la période.')]));
+  $('#p-plus').hidden = visites.length <= parcoursVisibles;
+  $('#p-plus').textContent = `Afficher plus (${visites.length - parcoursVisibles} restantes)`;
 }
 
 function cartesAppareils() {
@@ -498,7 +575,7 @@ function filtresJournal() {
 const filtres = () => vue.evts.filter((e) => (!$('#f-app').value || e.uid === $('#f-app').value) && (!$('#f-type').value || e.type === $('#f-type').value)).reverse();
 function detail(e) {
   if (e.type === 'ouvre') return [e.ua, e.ecran, e.inst ? 'installée' : 'navigateur'].filter(Boolean).join(' · ');
-  if (e.type === 'action') return ACTIONS[e.nom] ?? e.nom;
+  if (e.type === 'action') return (ACTIONS[e.nom] ?? e.nom) + (e.detail ? ' : ' + e.detail : '');
   if (e.type === 'fin') return 'resté ' + duree(e.ms);
   return e.nom;
 }
@@ -579,6 +656,8 @@ document.querySelectorAll('.segments button').forEach((b) => b.addEventListener(
   calcule();
 }));
 $('#actualiser').addEventListener('click', charge);
+$('#p-app').addEventListener('change', () => { parcoursVisibles = 10; parcours(); });
+$('#p-plus').addEventListener('click', () => { parcoursVisibles += 10; parcours(); });
 $('#f-app').addEventListener('change', () => { visibles = 100; journal(); });
 $('#f-type').addEventListener('change', () => { visibles = 100; journal(); });
 $('#plus').addEventListener('click', () => { visibles += 100; journal(); });

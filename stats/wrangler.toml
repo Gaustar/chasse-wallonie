@@ -1,0 +1,12 @@
+name = "chasse-stats"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "chasse-stats"
+database_id = "aebf4562-80f1-4970-87af-cadf31ddc94d"
+
+[triggers]
+crons = ["0 3 * * *"]

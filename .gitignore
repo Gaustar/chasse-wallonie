@@ -1,3 +1,4 @@
 data/*
 !data/villages.json
 cal/
+stats/.wrangler/

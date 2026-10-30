@@ -63,7 +63,7 @@ const fonds = {
 const fondChoisi = memoire('fond', 'Carte IGN');
 fonds[fondChoisi in fonds ? fondChoisi : 'Carte IGN'].addTo(carte);
 L.control.layers(fonds, null, { position: 'topright' }).addTo(carte);
-carte.on('baselayerchange', (e) => retient('fond', e.name));
+carte.on('baselayerchange', (e) => { retient('fond', e.name); suivi('fond'); });
 
 let donnees = null;
 let couche = null;
@@ -116,7 +116,7 @@ function dessine() {
         fillOpacity: fermee ? 0.4 : 0.18,
       };
     },
-    onEachFeature: (f, l) => l.bindPopup(() => infobulle(f), { maxWidth: 300 }),
+    onEachFeature: (f, l) => { l.bindPopup(() => infobulle(f), { maxWidth: 300 }); l.on('popupopen', () => suivi('territoire')); },
   }).addTo(carte);
   const n = new Set(couche.getLayers().map((l) => l.feature.properties.lot)).size;
   $('#compte').textContent = `${n} territoire${n > 1 ? 's' : ''}`;
@@ -407,6 +407,7 @@ function territoiresDuVillage(contour) {
 }
 
 function selectionnerVillage(i) {
+  suivi('village');
   const v = villages[i];
   const contour = contourVillage(v);
   const { lots, cantons } = territoiresDuVillage(contour);
@@ -528,18 +529,20 @@ function choisit(p) {
   dessine();
 }
 
-document.querySelectorAll('#periodes button').forEach((b) => b.addEventListener('click', () => choisit(b.dataset.p)));
+document.querySelectorAll('#periodes button').forEach((b) => b.addEventListener('click', () => { suivi('periode'); choisit(b.dataset.p); }));
 // Plage libre : si une borne dépasse l'autre, on ramène l'autre sur la même date.
 $('#du').addEventListener('change', (e) => {
+  suivi('periode');
   const debut = e.target.value;
   if (debut) choisit({ debut, fin: periode.fin < debut ? debut : periode.fin });
 });
 $('#au').addEventListener('change', (e) => {
+  suivi('periode');
   const fin = e.target.value;
   if (fin) choisit({ debut: periode.debut > fin ? fin : periode.debut, fin });
 });
 $('#raz').addEventListener('click', () => choisit('jour'));
-$('#modes').addEventListener('change', dessine);
+$('#modes').addEventListener('change', () => { suivi('mode'); dessine(); });
 
 $('#position').addEventListener('click', () => {
   const bouton = $('#position');
@@ -550,6 +553,7 @@ $('#position').addEventListener('click', () => {
     return;
   }
   bouton.classList.add('suivi');
+  suivi('gps');
   bouton.title = 'Arrêter le suivi';
   carte.locate({ watch: true, enableHighAccuracy: true });
   if (moi) carte.setView(moi.latlng, Math.max(carte.getZoom(), 14));
@@ -620,6 +624,8 @@ async function charge() {
   } catch (e) {
     etat.textContent = `Données indisponibles (${e.message})`;
     etat.className = 'perime';
+    suiviOuvre(null);
+    suivi(`données : ${e.message}`, { type: 'erreur' });
     return;
   }
   const m = donnees.meta;
@@ -633,6 +639,7 @@ async function charge() {
     $(id).max = m.fin;
     $(id).value = periode.debut;
   }
+  suiviOuvre(m.genere);
   affichePeriode();
   prepareCalendrier();
   if (!lienProfond()) dessine();
@@ -792,6 +799,7 @@ $('#cal').addEventListener('change', (e) => {
   majCalendrier();
 });
 $('#cal-dl').addEventListener('click', async () => {
+  suivi('ics');
   const s = selection();
   const titre = `Chasses · ${s.nom}`;
   const contenu = ICS.fichier(titre, 'Chasses déclarées au DNF (Wallonie) et jours chassés publiés par l’ONF (France). Les panneaux sur le terrain priment toujours.', s.evts, { rappel: $('#cal-rappel').value });
@@ -811,6 +819,7 @@ $('#cal-dl').addEventListener('click', async () => {
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 });
 $('#cal-copie').addEventListener('click', async (e) => {
+  suivi('abonnement');
   try {
     await navigator.clipboard.writeText(e.target.dataset.adresse);
     e.target.textContent = 'Adresse copiée';

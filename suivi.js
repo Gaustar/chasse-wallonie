@@ -28,7 +28,8 @@
 
   const envoie = (e) => {
     ecrit('sid-t', Date.now());
-    navigator.sendBeacon?.(URL_STATS, JSON.stringify({ appareil, uid, sid, ...e }));
+    // keepalive : l'envoi survit à la fermeture de l'onglet ; text/plain : pas de requête préalable CORS.
+    fetch(URL_STATS, { method: 'POST', body: JSON.stringify({ appareil, uid, sid, ...e }), keepalive: true, credentials: 'omit' }).catch(() => {});
   };
 
   let debut = document.visibilityState === 'visible' ? Date.now() : 0;

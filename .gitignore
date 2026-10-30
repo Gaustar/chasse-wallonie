@@ -2,3 +2,4 @@ data/*
 !data/villages.json
 cal/
 stats/.wrangler/
+stats/.dev.vars

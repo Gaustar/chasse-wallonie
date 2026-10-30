@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Fréquentation · Chasses du jour</title>
+<style>
+/* Palette appareils : catégorielle validée (daltonisme, deux thèmes) ; carte de chaleur : rampe bleue séquentielle. */
+:root {
+  color-scheme: light;
+  --fond: #f5f4ef; --surface: #fff; --texte: #1b1f1a; --texte2: #6a7065; --bord: #e2e0d8;
+  --accent: #2e6b3e; --danger: #b42318; --vide: #f0efec;
+  --ombre: 0 1px 2px #0000000a, 0 8px 24px #0000000a;
+  --d0: #2a78d6; --d1: #eb6834; --d2: #1baf7a; --d3: #eda100; --d4: #e87ba4; --d5: #9ca3af;
+  --h1: #cde2fb; --h2: #9ec5f4; --h3: #6da7ec; --h4: #3987e5; --h5: #256abf; --h6: #184f95;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --fond: #111311; --surface: #1a1d1a; --texte: #e8ebe5; --texte2: #99a094; --bord: #2a2f29;
+    --accent: #7bc48a; --danger: #f97066; --vide: #232723; --ombre: none;
+    --d0: #3987e5; --d1: #d95926; --d2: #199e70; --d3: #c98500; --d4: #d55181; --d5: #6b7280;
+    --h1: #104281; --h2: #1c5cab; --h3: #256abf; --h4: #3987e5; --h5: #6da7ec; --h6: #9ec5f4;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--fond); color: var(--texte); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, select { font: inherit; color: inherit; }
+.page { max-width: 1120px; margin: 0 auto; padding: 0 16px 40px; }
+header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--fond) 88%, transparent); backdrop-filter: blur(8px); }
+header .page { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-top: 12px; padding-bottom: 12px; }
+h1 { margin: 0; font-size: 20px; font-weight: 650; }
+h1 small { display: block; font-size: 12px; font-weight: 400; color: var(--texte2); }
+h2 { margin: 0 0 12px; font-size: 15px; font-weight: 650; }
+.sous { font-size: 13px; color: var(--texte2); font-weight: 400; }
+.droite { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+.segments { position: relative; display: inline-flex; padding: 3px; border-radius: 999px; background: var(--surface); border: 1px solid var(--bord); }
+.segments button { position: relative; z-index: 1; border: 0; background: none; padding: 6px 12px; border-radius: 999px; cursor: pointer; font-size: 13px; color: var(--texte2); }
+.segments button[aria-pressed="true"] { color: var(--surface); font-weight: 600; }
+.segments .curseur { position: absolute; top: 3px; bottom: 3px; left: 0; border-radius: 999px; background: var(--texte); transition: transform .2s, width .2s; }
+.bouton { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--bord); background: var(--surface); cursor: pointer; font-size: 13px; }
+.bouton:disabled { opacity: .45; cursor: default; }
+.bouton.danger { border-color: var(--danger); color: var(--danger); background: transparent; }
+.bouton.plein { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+.grille { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; }
+.carte { grid-column: span 12; background: var(--surface); border: 1px solid var(--bord); border-radius: 14px; box-shadow: var(--ombre); padding: 16px; min-width: 0; }
+.tuile { grid-column: span 3; }
+.chaleur { grid-column: span 7; }
+.actions { grid-column: span 5; }
+@media (max-width: 760px) {
+  .tuile { grid-column: span 6; }
+  .chaleur, .actions { grid-column: span 12; }
+  .tuile .valeur { font-size: 22px; white-space: nowrap; }
+  .histo .barres { gap: 1px; }
+}
+.tuile .etiquette { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--texte2); }
+.tuile .valeur { font-size: 32px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.15; margin: 4px 0; }
+.tuile .valeur.texte { font-size: 20px; padding: 8px 0 4px; }
+.pastille { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--vide); color: var(--texte2); }
+.point { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; }
+
+/* Sessions par jour : barres en HTML, axes en HTML (pas de texte étiré dans un SVG). */
+.histo { position: relative; display: grid; grid-template-columns: auto 1fr; gap: 0 8px; }
+.histo .y { display: flex; flex-direction: column; justify-content: space-between; font-size: 12px; color: var(--texte2); text-align: right; height: 180px; font-variant-numeric: tabular-nums; }
+.histo .zone { position: relative; height: 180px; border-bottom: 1px solid var(--bord); background: linear-gradient(var(--bord) 1px, transparent 1px) 0 0 / 100% 50%; }
+.histo .barres { position: absolute; inset: 0; display: flex; align-items: flex-end; gap: 2px; }
+.histo .jour { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column-reverse; justify-content: flex-start; gap: 2px; cursor: default; }
+.histo .jour:hover, .histo .jour:focus { background: color-mix(in srgb, var(--texte) 6%, transparent); outline: none; }
+.histo .seg { border-radius: 0; }
+.histo .seg:last-child { border-radius: 4px 4px 0 0; }
+.histo .x { grid-column: 2; display: flex; justify-content: space-between; font-size: 12px; color: var(--texte2); padding-top: 6px; }
+.legende { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; font-size: 13px; }
+.legende span { display: inline-flex; align-items: center; gap: 6px; }
+
+.hm { display: grid; grid-template-columns: auto repeat(24, minmax(0, 1fr)); gap: 2px; font-size: 11px; color: var(--texte2); }
+.hm .c { aspect-ratio: 1; min-width: 0; border-radius: 3px; background: var(--vide); }
+.hm .c:hover, .hm .c:focus { outline: 2px solid var(--texte); outline-offset: 1px; }
+.hm .lj { padding-right: 6px; align-self: center; }
+.hm .h { text-align: left; }
+.rampe { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-size: 12px; color: var(--texte2); }
+.rampe i { width: 14px; height: 10px; border-radius: 2px; }
+
+.barre-h { display: grid; grid-template-columns: 9.5rem 1fr 2.5rem; align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; }
+.barre-h .piste { height: 10px; }
+.barre-h .remplie { height: 100%; border-radius: 0 4px 4px 0; background: var(--d0); min-width: 2px; }
+.barre-h b { text-align: right; font-variant-numeric: tabular-nums; }
+
+.appareils { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.appareils .carte { grid-column: auto; }
+.appareil h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 15px; }
+.appareil input { flex: 1; min-width: 0; border: 1px solid transparent; border-radius: 8px; padding: 4px 8px; background: transparent; font-weight: 650; }
+.appareil input:hover, .appareil input:focus { border-color: var(--bord); background: var(--fond); outline: none; }
+.appareil dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0 0 10px; font-size: 13px; }
+.appareil dt { color: var(--texte2); }
+.appareil dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.appareil .spark { display: flex; align-items: flex-end; gap: 1px; height: 32px; margin: 6px 0 10px; border-bottom: 1px solid var(--bord); }
+.appareil .spark i { flex: 1; border-radius: 2px 2px 0 0; min-height: 0; }
+.appareil .puces { display: flex; flex-wrap: wrap; gap: 4px; min-height: 22px; margin-bottom: 12px; }
+
+.filtres { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.filtres select { min-height: 36px; border: 1px solid var(--bord); border-radius: 8px; background: var(--surface); padding: 0 8px; }
+.ligne { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-top: 1px solid var(--bord); font-size: 13px; }
+.ligne input { width: 18px; height: 18px; flex: none; accent-color: var(--danger); }
+.ligne .qui { flex: none; width: 8.5rem; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ligne .quoi { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ligne .quand { flex: none; color: var(--texte2); font-variant-numeric: tabular-nums; }
+.ligne.entete { border-top: 0; color: var(--texte2); }
+@media (max-width: 520px) { .ligne .qui { width: 5.5rem; } }
+.vide { color: var(--texte2); font-size: 13px; padding: 16px 0; }
+
+details.danger { border: 1px dashed var(--danger); border-radius: 14px; padding: 12px 16px; }
+details.danger summary { cursor: pointer; color: var(--danger); font-weight: 600; }
+details.danger input { min-height: 36px; border: 1px solid var(--bord); border-radius: 8px; padding: 0 10px; background: var(--surface); width: 8rem; }
+
+.bulle { position: fixed; z-index: 20; pointer-events: none; background: var(--surface); color: var(--texte); border: 1px solid var(--bord); border-radius: 8px; box-shadow: 0 8px 24px #00000026; padding: 8px 10px; font-size: 13px; min-width: 9rem; }
+.bulle .t { color: var(--texte2); font-size: 12px; margin-bottom: 4px; }
+.bulle .r { display: flex; align-items: center; gap: 6px; }
+.bulle .r i { width: 12px; height: 2px; flex: none; }
+.bulle .r b { font-variant-numeric: tabular-nums; }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--texte); color: var(--surface); padding: 10px 16px; border-radius: 999px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 30; }
+.toast.vu { opacity: 1; }
+dialog { border: 1px solid var(--bord); border-radius: 14px; background: var(--surface); color: var(--texte); padding: 20px; width: min(420px, calc(100vw - 32px)); }
+dialog::backdrop { background: #0008; }
+dialog .boutons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.connexion { max-width: 360px; margin: 18vh auto 0; }
+.connexion input { width: 100%; min-height: 44px; margin: 12px 0; padding: 0 12px; border: 1px solid var(--bord); border-radius: 8px; background: var(--fond); font-size: 16px; }
+.connexion .bouton { width: 100%; justify-content: center; min-height: 44px; background: var(--texte); color: var(--surface); border-color: var(--texte); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<form class="page connexion carte" id="connexion" hidden>
+  <h1>Fréquentation<small>Chasses du jour</small></h1>
+  <input id="jeton" type="password" autocomplete="current-password" placeholder="Jeton d'accès" aria-label="Jeton d'accès" required>
+  <button class="bouton">Entrer</button>
+  <p class="sous" id="connexion-erreur" role="alert"></p>
+</form>
+
+<div id="app" hidden>
+  <header>
+    <div class="page">
+      <h1>Fréquentation<small>Chasses du jour</small></h1>
+      <div class="droite">
+        <div class="segments" role="group" aria-label="Période">
+          <span class="curseur" aria-hidden="true"></span>
+          <button type="button" data-p="7">7 j</button>
+          <button type="button" data-p="30">30 j</button>
+          <button type="button" data-p="90">90 j</button>
+          <button type="button" data-p="tout">Tout</button>
+        </div>
+        <button type="button" class="bouton" id="actualiser" aria-label="Actualiser" title="Actualiser">↻</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="page grille">
+    <section class="carte tuile"><div class="etiquette">Appareils actifs</div><div class="valeur" id="k-app"></div><span class="pastille" id="k-app-s"></span></section>
+    <section class="carte tuile"><div class="etiquette">Sessions</div><div class="valeur" id="k-ses"></div><span class="pastille" id="k-ses-s"></span></section>
+    <section class="carte tuile"><div class="etiquette">Durée moyenne</div><div class="valeur" id="k-dur"></div><span class="pastille" id="k-dur-s"></span></section>
+    <section class="carte tuile"><div class="etiquette">Dernière visite</div><div class="valeur texte" id="k-der"></div><span class="pastille" id="k-der-s"></span></section>
+
+    <section class="carte"><h2>Sessions par jour <span class="sous" id="histo-sous"></span></h2><div id="histo"></div></section>
+    <section class="carte chaleur"><h2>Quand l'appli sert <span class="sous">sessions par heure et jour</span></h2><div id="hm"></div></section>
+    <section class="carte actions"><h2>Actions <span class="sous" id="act-sous"></span></h2><div id="actions"></div></section>
+
+    <section class="carte"><h2>Appareils <span class="sous">cliquez sur un nom pour le changer</span></h2><div class="appareils" id="appareils"></div></section>
+
+    <section class="carte">
+      <h2>Journal <span class="sous" id="j-sous"></span></h2>
+      <div class="filtres">
+        <select id="f-app" aria-label="Filtrer par appareil"></select>
+        <select id="f-type" aria-label="Filtrer par type">
+          <option value="">Tous les types</option><option value="ouvre">Ouvertures</option><option value="action">Actions</option><option value="fin">Fins de visite</option><option value="erreur">Erreurs</option>
+        </select>
+        <span class="droite">
+          <button type="button" class="bouton danger" id="sup-sel" disabled>Supprimer la sélection</button>
+          <button type="button" class="bouton danger" id="sup-filtre">Supprimer le filtré</button>
+        </span>
+      </div>
+      <div class="ligne entete"><input type="checkbox" id="tout-cocher" aria-label="Cocher les lignes affichées"><span class="quoi">Cocher les lignes affichées</span></div>
+      <div id="journal"></div>
+      <button type="button" class="bouton" id="plus" hidden>Afficher plus</button>
+    </section>
+
+    <section class="carte" style="padding:0;border:0;box-shadow:none;background:none">
+      <details class="danger">
+        <summary>Zone de danger</summary>
+        <p class="sous">Efface tous les événements et tous les noms d'appareils. Irréversible. Tapez <b>VIDER</b> pour activer le bouton.</p>
+        <input id="vider-mot" autocomplete="off" aria-label="Tapez VIDER"> <button type="button" class="bouton plein" id="vider" disabled>Vider la base</button>
+      </details>
+    </section>
+  </main>
+</div>
+
+<dialog id="confirmer">
+  <h2 id="confirmer-titre"></h2>
+  <p class="sous" id="confirmer-texte"></p>
+  <div class="boutons"><button type="button" class="bouton" id="non" autofocus>Annuler</button><button type="button" class="bouton plein" id="oui">Supprimer</button></div>
+</dialog>
+<div class="bulle" id="bulle" role="tooltip" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+// Heures stockées en UTC (ms) ; tout découpage jour/heure passe par Intl en Europe/Brussels, jamais de calcul de décalage.
+const TZ = 'Europe/Brussels';
+const $ = (s) => document.querySelector(s);
+const fJour = new Intl.DateTimeFormat('en-CA', { timeZone: TZ });
+const fHeure = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hourCycle: 'h23' }); // « 13 », pas « 13 h »
+const fDate = new Intl.DateTimeFormat('fr-BE', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const fCourt = new Intl.DateTimeFormat('fr-BE', { timeZone: 'UTC', day: 'numeric', month: 'short' });
+const jourDe = (t) => fJour.format(t);
+const heureDe = (t) => Number(fHeure.format(t));
+const decale = (jour, n) => { const d = new Date(jour + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const jsemDe = (jour) => (new Date(jour + 'T12:00:00Z').getUTCDay() + 6) % 7; // 0 = lundi
+const JOURS = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
+const ACTIONS = { periode: 'Période', territoire: 'Territoire ouvert', ics: 'Export .ics', abonnement: 'Abonnement agenda', gps: 'GPS', fond: 'Fond de carte', mode: 'Filtre battue/affût', village: 'Recherche village' };
+const TYPES = { ouvre: 'Ouverture', action: 'Action', fin: 'Fin de visite', erreur: 'Erreur' };
+const CAT = 5; // au-delà, gris : jamais de couleur générée
+
+const duree = (ms) => {
+  if (!ms) return '0 s';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + ' s';
+  if (s < 3600) return Math.floor(s / 60) + ' min ' + String(s % 60).padStart(2, '0');
+  return Math.floor(s / 3600) + ' h ' + String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+};
+const relatif = (t) => {
+  const m = (Date.now() - t) / 60000;
+  if (m < 1) return "à l'instant";
+  if (m < 60) return 'il y a ' + Math.round(m) + ' min';
+  if (m < 24 * 60) return 'il y a ' + Math.round(m / 60) + ' h';
+  const j = Math.round(m / 1440);
+  return j === 1 ? 'hier' : 'il y a ' + j + ' j';
+};
+
+// Construit un élément ; le texte passe toujours par des nœuds texte (noms et messages viennent de l'extérieur).
+function el(tag, attrs = {}, ...enfants) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'style') Object.assign(e.style, v);
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of enfants.flat()) if (c != null && c !== false) e.append(c instanceof Node ? c : String(c));
+  return e;
+}
+const point = (a) => el('span', { class: 'point', style: { background: a.couleur } });
+
+let jeton = null;
+try { jeton = sessionStorage.getItem('k'); } catch {}
+let brut = null, noms = {}, comptes = {}, total = 0, periode = '30', vue = null, selection = new Set(), visibles = 100;
+try { periode = localStorage.getItem('periode') || '30'; } catch {}
+if (!['7', '30', '90', 'tout'].includes(periode)) periode = '30';
+
+async function api(chemin, corps) {
+  const r = await fetch(chemin, corps ? { method: 'POST', headers: { Authorization: 'Bearer ' + jeton }, body: JSON.stringify(corps) } : { headers: { Authorization: 'Bearer ' + jeton } });
+  if (r.status === 401) { deconnecte('Jeton refusé.'); throw new Error('jeton'); }
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+function deconnecte(msg) {
+  jeton = null;
+  try { sessionStorage.removeItem('k'); } catch {}
+  $('#app').hidden = true;
+  $('#connexion').hidden = false;
+  $('#connexion-erreur').textContent = msg || '';
+  $('#jeton').focus();
+}
+$('#connexion').addEventListener('submit', (e) => {
+  e.preventDefault();
+  jeton = $('#jeton').value.trim();
+  try { sessionStorage.setItem('k', jeton); } catch {}
+  charge();
+});
+
+async function charge() {
+  let d;
+  try { d = await api('/donnees'); } catch (e) { if (e.message !== 'jeton') toast('Chargement impossible : ' + e.message); return; }
+  brut = d.evenements.slice().reverse(); // plus ancien d'abord
+  noms = d.noms;
+  comptes = d.comptes;
+  total = d.total;
+  if (d.total > d.limite) toast(`Seuls les ${d.limite} derniers événements sur ${d.total} sont chargés.`);
+  $('#connexion').hidden = true;
+  $('#app').hidden = false;
+  calcule();
+}
+
+// Tout se calcule ici, sur l'ensemble chargé ; la période ne fait que filtrer.
+function calcule() {
+  const auj = jourDe(Date.now());
+  const appareils = new Map();
+  const sessions = new Map();
+  for (const e of brut) {
+    let a = appareils.get(e.uid);
+    if (!a) {
+      const rang = appareils.size; // couleur = ordre de première visite, stable quel que soit le filtre
+      a = { uid: e.uid, rang, couleur: `var(--d${Math.min(rang, CAT)})`, nom: Object.hasOwn(noms, e.uid) ? noms[e.uid] : '', premiere: e.t, derniere: e.t, ua: null, ecran: null, inst: null };
+      appareils.set(e.uid, a);
+    }
+    a.derniere = e.t;
+    a.ua = e.ua ?? a.ua; a.ecran = e.ecran ?? a.ecran; a.inst = e.inst ?? a.inst;
+    let s = sessions.get(e.sid);
+    if (!s) sessions.set(e.sid, (s = { sid: e.sid, uid: e.uid, debut: e.t, jour: jourDe(e.t), ms: 0 }));
+    if (e.type === 'fin') s.ms += e.ms ?? 0;
+  }
+  const premierJour = brut.length ? jourDe(brut[0].t) : auj;
+  const n = periode === 'tout' ? null : Number(periode);
+  const debut = n ? decale(auj, -(n - 1)) : premierJour;
+  const avant = n && decale(debut, -n) >= premierJour ? [decale(debut, -n), decale(debut, -1)] : null;
+  const dans = (j) => j >= debut && j <= auj;
+  vue = {
+    auj, debut, avant, appareils,
+    evts: brut.filter((e) => dans(jourDe(e.t))),
+    sessions: [...sessions.values()].filter((s) => dans(s.jour)),
+    precedentes: avant ? [...sessions.values()].filter((s) => s.jour >= avant[0] && s.jour <= avant[1]) : null,
+  };
+  rend();
+}
+
+function rend() {
+  majSegments();
+  tuiles();
+  histogramme();
+  chaleur();
+  actions();
+  cartesAppareils();
+  filtresJournal();
+  journal();
+}
+
+function variation(nb, ref, format = (x) => x) {
+  if (ref == null) return '';
+  const d = nb - ref;
+  return (d > 0 ? '+' : d < 0 ? '−' : '±') + format(Math.abs(d)) + ' vs période préc.';
+}
+function tuiles() {
+  const { sessions, precedentes, evts, appareils } = vue;
+  const actifs = new Set(sessions.map((s) => s.uid));
+  $('#k-app').textContent = actifs.size;
+  $('#k-app-s').textContent = 'sur ' + appareils.size + ' au total';
+  $('#k-ses').textContent = sessions.length;
+  $('#k-ses-s').textContent = variation(sessions.length, precedentes?.length) || (vue.debut ? 'depuis le ' + fCourt.format(new Date(vue.debut + 'T12:00:00Z')) : '');
+  // Sessions sans « fin » reçue (en cours, envoi perdu) exclues : elles tireraient la moyenne vers 0.
+  const moy = (l) => { const f = l.filter((s) => s.ms > 0); return f.length ? f.reduce((n, s) => n + s.ms, 0) / f.length : 0; };
+  $('#k-dur').textContent = duree(moy(sessions));
+  $('#k-dur-s').textContent = precedentes ? variation(Math.round(moy(sessions) / 1000), Math.round(moy(precedentes) / 1000), (s) => duree(s * 1000)) : 'par session';
+  const der = evts[evts.length - 1] ?? brut[brut.length - 1];
+  const kd = $('#k-der');
+  kd.replaceChildren();
+  const ks = $('#k-der-s');
+  ks.replaceChildren();
+  if (der) {
+    const a = appareils.get(der.uid);
+    kd.append(relatif(der.t));
+    kd.title = fDate.format(der.t);
+    ks.append(point(a), nomDe(a));
+  } else kd.append('—');
+}
+const nomDe = (a) => a.nom || a.uid;
+
+// Infobulle partagée : valeur en gras d'abord, libellé ensuite ; suit le pointeur ou le focus clavier.
+const bulle = $('#bulle');
+function montreBulle(cible, titre, lignes, ev) {
+  bulle.replaceChildren(el('div', { class: 't' }, titre), ...lignes.map(([c, v, l]) => el('div', { class: 'r' }, c ? el('i', { style: { background: c } }) : null, el('b', {}, v), ' ', l)));
+  bulle.hidden = false;
+  const r = cible.getBoundingClientRect();
+  const x = ev?.clientX ?? r.left + r.width / 2, y = ev?.clientY ?? r.top;
+  const b = bulle.getBoundingClientRect();
+  bulle.style.left = Math.min(Math.max(8, x + 12), innerWidth - b.width - 8) + 'px';
+  bulle.style.top = (y - b.height - 12 < 8 ? y + 16 : y - b.height - 12) + 'px';
+}
+const cacheBulle = () => (bulle.hidden = true);
+function survol(e, titre, lignes) {
+  const f = (ev) => montreBulle(e, titre(), lignes(), ev);
+  e.tabIndex = 0;
+  e.addEventListener('pointermove', f);
+  e.addEventListener('focus', () => f());
+  e.addEventListener('pointerleave', cacheBulle);
+  e.addEventListener('blur', cacheBulle);
+}
+
+function joursDeVue() {
+  const jours = [];
+  // shortcut: « Tout » limité aux 180 derniers jours dans l'histogramme ; regrouper par semaine si l'historique s'allonge.
+  let j = vue.debut < decale(vue.auj, -179) ? decale(vue.auj, -179) : vue.debut;
+  for (; j <= vue.auj; j = decale(j, 1)) jours.push(j);
+  return jours;
+}
+
+function histogramme() {
+  const jours = joursDeVue();
+  const parJour = new Map(jours.map((j) => [j, new Map()]));
+  for (const s of vue.sessions) {
+    const m = parJour.get(s.jour);
+    if (m) m.set(s.uid, (m.get(s.uid) ?? 0) + 1);
+  }
+  const max = Math.max(1, ...[...parJour.values()].map((m) => [...m.values()].reduce((a, b) => a + b, 0)));
+  const haut = Math.ceil(max / 2) * 2; // graduation paire : milieu entier
+  const ordre = [...vue.appareils.values()].sort((a, b) => a.rang - b.rang);
+  const barres = el('div', { class: 'barres', style: { gap: jours.length > 45 ? '0' : '' } });
+  for (const j of jours) {
+    const m = parJour.get(j);
+    const col = el('div', { class: 'jour', role: 'img', 'aria-label': j });
+    for (const a of ordre) if (m.get(a.uid)) col.append(el('div', { class: 'seg', style: { height: (m.get(a.uid) / haut) * 100 + '%', background: a.couleur } }));
+    survol(col, () => fCourt.format(new Date(j + 'T12:00:00Z')) + ' · ' + JOURS[jsemDe(j)],
+      () => { const l = ordre.filter((a) => m.get(a.uid)).map((a) => [a.couleur, m.get(a.uid), nomDe(a)]); return l.length ? l : [[null, 0, 'session']]; });
+    barres.append(col);
+  }
+  const lab = (j) => fCourt.format(new Date(j + 'T12:00:00Z'));
+  const milieu = jours[Math.floor(jours.length / 2)];
+  const presents = ordre.filter((a) => vue.sessions.some((s) => s.uid === a.uid));
+  $('#histo').replaceChildren(
+    el('div', { class: 'histo' },
+      el('div', { class: 'y', 'aria-hidden': 'true' }, el('span', {}, haut), el('span', {}, haut / 2), el('span', {}, '0')),
+      el('div', { class: 'zone' }, barres),
+      el('div', { class: 'x', 'aria-hidden': 'true' }, el('span', {}, lab(jours[0])), jours.length > 2 ? el('span', {}, lab(milieu)) : null, el('span', {}, lab(jours[jours.length - 1])))),
+    presents.length > 1 ? el('div', { class: 'legende' }, presents.map((a) => el('span', {}, el('i', { class: 'point', style: { background: a.couleur, borderRadius: '2px' } }), nomDe(a)))) : null,
+  );
+  $('#histo-sous').textContent = presents.length === 1 ? '· ' + nomDe(presents[0]) : '';
+}
+
+function chaleur() {
+  const g = Array.from({ length: 7 }, () => Array(24).fill(0));
+  for (const s of vue.sessions) g[jsemDe(s.jour)][heureDe(s.debut)]++;
+  const max = Math.max(0, ...g.flat());
+  const grille = el('div', { class: 'hm' }, el('span'));
+  for (let h = 0; h < 24; h++) grille.append(el('span', { class: 'h', 'aria-hidden': 'true' }, h % 6 === 0 ? h + 'h' : ''));
+  g.forEach((ligne, d) => {
+    grille.append(el('span', { class: 'lj' }, JOURS[d]));
+    ligne.forEach((v, h) => {
+      const c = el('span', { class: 'c', role: 'img', 'aria-label': `${JOURS[d]} ${h}h : ${v} session${v > 1 ? 's' : ''}` });
+      if (v) c.style.background = `var(--h${Math.max(1, Math.ceil((v / max) * 6))})`;
+      survol(c, () => `${JOURS[d]} · ${h}h–${h + 1}h`, () => [[null, v, v > 1 ? 'sessions' : 'session']]);
+      grille.append(c);
+    });
+  });
+  $('#hm').replaceChildren(grille, el('div', { class: 'rampe', 'aria-hidden': 'true' }, 'moins', el('i', { style: { background: 'var(--vide)' } }), [1, 2, 3, 4, 5, 6].map((i) => el('i', { style: { background: `var(--h${i})` } })), 'plus'));
+}
+
+function actions() {
+  const n = new Map();
+  for (const e of vue.evts) if (e.type === 'action') n.set(e.nom, (n.get(e.nom) ?? 0) + 1);
+  const l = [...n].sort((a, b) => b[1] - a[1]);
+  const max = l[0]?.[1] ?? 1;
+  $('#act-sous').textContent = l.length ? l.reduce((s, [, v]) => s + v, 0) + ' au total' : '';
+  $('#actions').replaceChildren(...(l.length
+    ? l.map(([nom, v]) => el('div', { class: 'barre-h' }, el('span', {}, ACTIONS[nom] ?? nom), el('div', { class: 'piste' }, el('div', { class: 'remplie', style: { width: (v / max) * 100 + '%' } })), el('b', {}, v)))
+    : [el('p', { class: 'vide' }, 'Aucune action sur la période.')]));
+}
+
+function cartesAppareils() {
+  const liste = [...vue.appareils.values()].sort((a, b) => b.derniere - a.derniere);
+  const jours30 = Array.from({ length: 30 }, (_, i) => decale(vue.auj, i - 29));
+  $('#appareils').replaceChildren(...(liste.length ? liste.map((a) => {
+    const ses = vue.sessions.filter((s) => s.uid === a.uid);
+    const toutes = brut.filter((e) => e.uid === a.uid);
+    const sesTout = new Set(toutes.map((e) => e.sid));
+    const parJour = jours30.map((j) => new Set(toutes.filter((e) => jourDe(e.t) === j).map((e) => e.sid)).size);
+    const maxJ = Math.max(1, ...parJour);
+    const acts = new Map();
+    for (const e of vue.evts) if (e.uid === a.uid && e.type === 'action') acts.set(e.nom, (acts.get(e.nom) ?? 0) + 1);
+    const champ = el('input', { value: a.nom, placeholder: a.uid, maxlength: 24, 'aria-label': 'Nom de l’appareil ' + a.uid });
+    champ.addEventListener('change', async () => {
+      await api('/nommer', { uid: a.uid, nom: champ.value });
+      toast(champ.value.trim() ? 'Nom enregistré' : 'Nom retiré');
+      charge();
+    });
+    champ.addEventListener('keydown', (e) => e.key === 'Enter' && champ.blur());
+    const spark = el('div', { class: 'spark', role: 'img', 'aria-label': 'Sessions par jour sur 30 jours : ' + parJour.join(', ') },
+      parJour.map((v, i) => { const b = el('i', { style: { height: (v / maxJ) * 100 + '%', background: a.couleur } }); survol(b, () => fCourt.format(new Date(jours30[i] + 'T12:00:00Z')), () => [[a.couleur, v, v > 1 ? 'sessions' : 'session']]); b.tabIndex = -1; return b; }));
+    return el('article', { class: 'carte appareil' },
+      el('h3', {}, point(a), champ),
+      el('dl', {},
+        el('dt', {}, 'Appareil'), el('dd', {}, [a.ua ?? '?', a.ecran].filter(Boolean).join(' · ')),
+        el('dt', {}, 'Appli'), el('dd', {}, a.inst ? 'installée' : a.inst === 0 ? 'navigateur' : '?'),
+        el('dt', {}, 'Première visite'), el('dd', {}, fDate.format(a.premiere)),
+        el('dt', {}, 'Dernière visite'), el('dd', { title: fDate.format(a.derniere) }, relatif(a.derniere)),
+        el('dt', {}, 'Sessions'), el('dd', {}, ses.length + ' sur la période · ' + sesTout.size + ' en tout'),
+        el('dt', {}, 'Temps passé'), el('dd', {}, duree(ses.reduce((n, s) => n + s.ms, 0))),
+      ),
+      spark,
+      el('div', { class: 'puces' }, [...acts].sort((x, y) => y[1] - x[1]).slice(0, 4).map(([nom, v]) => el('span', { class: 'pastille' }, (ACTIONS[nom] ?? nom) + ' · ' + v))),
+      el('button', { type: 'button', class: 'bouton danger', onclick: () => supprime({ uid: a.uid }, `Supprimer « ${nomDe(a)} » ?`, `Ses ${comptes[a.uid] ?? toutes.length} événements et son nom seront effacés.`) }, 'Supprimer ses données'),
+    );
+  }) : [el('p', { class: 'vide' }, 'Aucun appareil pour l’instant.')]));
+}
+
+function filtresJournal() {
+  const f = $('#f-app'), choix = f.value;
+  f.replaceChildren(el('option', { value: '' }, 'Tous les appareils'), ...[...vue.appareils.values()].sort((a, b) => a.rang - b.rang).map((a) => el('option', { value: a.uid }, nomDe(a))));
+  f.value = vue.appareils.has(choix) ? choix : '';
+}
+const filtres = () => vue.evts.filter((e) => (!$('#f-app').value || e.uid === $('#f-app').value) && (!$('#f-type').value || e.type === $('#f-type').value)).reverse();
+function detail(e) {
+  if (e.type === 'ouvre') return [e.ua, e.ecran, e.inst ? 'installée' : 'navigateur'].filter(Boolean).join(' · ');
+  if (e.type === 'action') return ACTIONS[e.nom] ?? e.nom;
+  if (e.type === 'fin') return 'resté ' + duree(e.ms);
+  return e.nom;
+}
+function journal() {
+  const l = filtres();
+  const ids = new Set(l.map((e) => e.id));
+  for (const i of selection) if (!ids.has(i)) selection.delete(i);
+  $('#j-sous').textContent = l.length + ' événement' + (l.length > 1 ? 's' : '');
+  $('#journal').replaceChildren(...(l.length ? l.slice(0, visibles).map((e) => {
+    const a = vue.appareils.get(e.uid);
+    const c = el('input', { type: 'checkbox', 'aria-label': 'Sélectionner' });
+    c.checked = selection.has(e.id);
+    c.addEventListener('change', () => { c.checked ? selection.add(e.id) : selection.delete(e.id); majBoutons(l); });
+    return el('div', { class: 'ligne' }, c,
+      el('span', { class: 'qui' }, point(a), nomDe(a)),
+      el('span', { class: 'quoi', title: detail(e) ?? '' }, el('b', { style: { color: e.type === 'erreur' ? 'var(--danger)' : '' } }, TYPES[e.type]), ' · ', detail(e) ?? ''),
+      el('span', { class: 'quand', title: relatif(e.t) }, fDate.format(e.t)));
+  }) : [el('p', { class: 'vide' }, 'Aucun événement avec ces filtres.')]));
+  $('#plus').hidden = l.length <= visibles;
+  $('#plus').textContent = `Afficher plus (${l.length - visibles} restants)`;
+  majBoutons(l);
+}
+function majBoutons(l = filtres()) {
+  $('#sup-sel').disabled = !selection.size;
+  $('#sup-sel').textContent = selection.size ? `Supprimer ${selection.size} sélectionné${selection.size > 1 ? 's' : ''}` : 'Supprimer la sélection';
+  $('#sup-filtre').disabled = !l.length;
+  $('#sup-filtre').textContent = `Supprimer les ${l.length} filtrés`;
+  const visiblesIds = l.slice(0, visibles).map((e) => e.id);
+  $('#tout-cocher').checked = visiblesIds.length > 0 && visiblesIds.every((i) => selection.has(i));
+}
+
+// Confirmation : le focus démarre sur « Annuler ».
+function confirme(titre, texte) {
+  const d = $('#confirmer');
+  $('#confirmer-titre').textContent = titre;
+  $('#confirmer-texte').textContent = texte;
+  d.showModal();
+  $('#non').focus();
+  return new Promise((ok) => {
+    const fin = (v) => { d.close(); $('#oui').onclick = $('#non').onclick = d.oncancel = null; ok(v); };
+    $('#oui').onclick = () => fin(true);
+    $('#non').onclick = () => fin(false);
+    d.oncancel = (e) => { e.preventDefault(); fin(false); };
+  });
+}
+// cible : { ids: [...] } (lignes listées) ou { uid } (appareil entier, côté serveur).
+async function supprime(cible, titre, texte) {
+  if ((cible.ids && !cible.ids.length) || !(await confirme(titre, texte))) return;
+  try {
+    const r = await api('/supprimer', cible);
+    selection.clear();
+    toast(`${r.supprimes} ligne${r.supprimes > 1 ? 's' : ''} supprimée${r.supprimes > 1 ? 's' : ''}`);
+  } catch (e) { if (e.message !== 'jeton') toast('Échec : ' + e.message); }
+  charge();
+}
+
+let minuteur;
+function toast(t) {
+  const e = $('#toast');
+  e.textContent = t;
+  e.classList.add('vu');
+  clearTimeout(minuteur);
+  minuteur = setTimeout(() => e.classList.remove('vu'), 3000);
+}
+
+function majSegments() {
+  const boutons = [...document.querySelectorAll('.segments button')];
+  boutons.forEach((b) => b.setAttribute('aria-pressed', b.dataset.p === periode));
+  const actif = boutons.find((b) => b.dataset.p === periode);
+  const curseur = $('.segments .curseur');
+  curseur.style.width = actif.offsetWidth + 'px';
+  curseur.style.transform = `translateX(${actif.offsetLeft}px)`;
+}
+document.querySelectorAll('.segments button').forEach((b) => b.addEventListener('click', () => {
+  periode = b.dataset.p;
+  try { localStorage.setItem('periode', periode); } catch {}
+  selection.clear();
+  calcule();
+}));
+$('#actualiser').addEventListener('click', charge);
+$('#f-app').addEventListener('change', () => { visibles = 100; journal(); });
+$('#f-type').addEventListener('change', () => { visibles = 100; journal(); });
+$('#plus').addEventListener('click', () => { visibles += 100; journal(); });
+$('#tout-cocher').addEventListener('change', (e) => {
+  for (const ev of filtres().slice(0, visibles)) e.target.checked ? selection.add(ev.id) : selection.delete(ev.id);
+  journal();
+});
+$('#sup-sel').addEventListener('click', () => supprime({ ids: [...selection] }, `Supprimer ${selection.size} événement${selection.size > 1 ? 's' : ''} ?`, 'Les lignes cochées seront effacées définitivement.'));
+$('#sup-filtre').addEventListener('click', () => { const l = filtres(); supprime({ ids: l.map((e) => e.id) }, `Supprimer ${l.length} événement${l.length > 1 ? 's' : ''} ?`, `Les ${l.length} événements listés (période et filtres actuels) seront effacés définitivement.`); });
+$('#vider-mot').addEventListener('input', (e) => ($('#vider').disabled = e.target.value !== 'VIDER'));
+$('#vider').addEventListener('click', async () => {
+  if (!(await confirme('Vider toute la base ?', `Les ${total} événements de la base et tous les noms d’appareils seront effacés. Irréversible.`))) return;
+  try {
+    const r = await api('/supprimer', { tout: true });
+    toast(`Base vidée (${r.supprimes} lignes)`);
+    $('#vider-mot').value = '';
+    $('#vider').disabled = true;
+  } catch (e) { if (e.message !== 'jeton') toast('Échec : ' + e.message); }
+  charge();
+});
+addEventListener('resize', () => vue && majSegments());
+
+jeton ? charge() : deconnecte();
+</script>
+</body>
+</html>
